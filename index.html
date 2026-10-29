@@ -2898,6 +2898,7 @@ h4{font-size:14px}
       ctx.fillText('→ '+lbl, LW/2, LH-44);
       ctx.textAlign='start';
     }
+    drawDropHover();
     if(wool.on)drawWool();
     if(fish.on)drawFish();
   }
@@ -3388,7 +3389,7 @@ h4{font-size:14px}
   function setHint(){
     var msg='';
     if(fish.on)msg='';
-    else if(S.timeSec<40)msg='👆 点猫互动 · 按住猫可拖到任意房间 · 游乐园抓鱼/接猫毛赚猫币 · 📋 任务栏领奖';
+    else if(S.timeSec<40)msg='👆 点猫互动 · 按住猫拖到食盆/水盆/猫砂盆/澡盆/玩具上会触发互动 · 拖到屏幕边缘换房间 · 游乐园抓鱼赚猫币 · 📋 任务栏领奖';
     hintEl.textContent=msg;
     hintEl.classList.toggle('show',!!msg);
   }
@@ -3536,10 +3537,115 @@ h4{font-size:14px}
     }
     return best;
   }
+  /* ================= 拖放互动：把猫拖到可交互物体上触发 ================= */
+  var dropHover=null;
+  function dropState(c,state,x,y){
+    c.held=false;c.target=null;c.nextState=null;c.arriveDir=null;
+    c.x=clamp(x,40,2700);c.y=clamp(y,240,510);
+    c.state=state;c.animT=0;
+  }
+  function dropEat(c){
+    if(dispenserFood()<=0){toast('🍚 猫粮器空了，先补粮');return false;}
+    if(c.hunger>=99){bubble(c,'吃不下了…');return false;}
+    c.eatApplied=false;
+    dropState(c,'eat',BOWL.x-42,504);
+    return true;
+  }
+  function dropDrink(c){
+    if(waterDirty()){toast('💧 水脏了，先换水');return false;}
+    dropState(c,'drink',WBOWL.x-42,504);
+    return true;
+  }
+  function dropToilet(c){
+    if(litterFull()){toast('🧹 猫砂盆满了，先铲屎');return false;}
+    if(S.facilities.litter.clean<25){toast('🧹 猫砂太脏了，先铲屎或换砂');return false;}
+    dropState(c,'toilet',LITTER.x+rnd(-10,10),486);
+    bubble(c,'上厕所');
+    return true;
+  }
+  function dropBath(c){
+    bathCat(c,true);
+    return c.state==='bathe';
+  }
+  function dropGrass(c){
+    var g=S.grass;
+    if(!g||!g.stage){toast('🌿 还没种猫草（种子在游乐园种）');return false;}
+    if(g.stage===1){toast('🌿 猫草还在长');return false;}
+    if(g.bites<=0){toast('🌿 猫草被吃光了');return false;}
+    dropState(c,'eatgrass',1970,326);
+    bubble(c,'嚼猫草~');
+    return true;
+  }
+  function dropToy(c,id){
+    var toy=S.facilities.toys[id];
+    if(!toy||toy.dur<=0){toast('这个玩具已经坏了');return false;}
+    if(id==='bed'){
+      c.sleepInBed=true;c.sleepHeal=0;c.sleepDir=Math.random()<0.5?1:-1;
+      dropState(c,'sleep',645+rnd(-6,6),318);
+      bubble(c,'困了…');
+      return true;
+    }
+    var def=null;
+    for(var i=0;i<CFG.toys.length;i++)if(CFG.toys[i].id===id)def=CFG.toys[i];
+    if(!def)return false;
+    c.usingToy=id;
+    dropState(c,'play',def.x-32,def.y+6);
+    sfx('click');
+    return true;
+  }
+  function toyDropRunner(id){return function(c){return dropToy(c,id);};}
+  // 命中区域用矩形（贴近画出来的物件形状），避免食盆/水盆挨太近互相抢
+  function dropTargets(){
+    var list=[
+      {label:'🍚 吃饭',x:BOWL.x,y:BOWL.y-4,hw:34,hh:28,run:dropEat},
+      {label:'💧 喝水',x:WBOWL.x,y:WBOWL.y-4,hw:32,hh:28,run:dropDrink},
+      {label:'🧹 上厕所',x:LITTER.x,y:LITTER.y-8,hw:68,hh:38,run:dropToilet},
+      {label:'🛁 洗澡',x:BATH.x,y:BATH.y+8,hw:58,hh:34,run:dropBath},
+      {label:'🌿 啃猫草',x:1970,y:322,hw:52,hh:40,run:dropGrass}
+    ];
+    for(var i=0;i<CFG.toys.length;i++){
+      var t=CFG.toys[i];
+      if(!S.facilities.toys[t.id])continue;
+      list.push({label:(t.id==='bed'?'😴 睡猫窝':'🎾 '+t.name),
+        x:(t.id==='bed'?645:t.x),y:(t.id==='bed'?318:(t.id==='tree'?300:t.y+6)),
+        hw:48,hh:38,run:toyDropRunner(t.id)});
+    }
+    return list;
+  }
+  function dropTargetAt(x,y){
+    var list=dropTargets(),best=null,bestD=2;
+    for(var i=0;i<list.length;i++){
+      var t=list[i];
+      if(Math.abs(x-t.x)>t.hw||Math.abs(y-t.y)>t.hh)continue;
+      var d=Math.hypot((x-t.x)/t.hw,(y-t.y)/t.hh);
+      if(d<bestD){bestD=d;best=t;}
+    }
+    return best;
+  }
+  function drawDropHover(){
+    if(!dropHover||!grabCat||!grabMoved)return;
+    var t=dropHover,x=t.x-camX,y=t.y;
+    if(x<-180||x>LW+180)return;
+    var pulse=0.5+0.5*Math.sin(T*6);
+    ctx.save();
+    ctx.strokeStyle='rgba(232,145,45,'+(0.45+0.4*pulse).toFixed(3)+')';
+    ctx.lineWidth=3;
+    ctx.beginPath();ctx.ellipse(x,y+10,t.hw*0.85,15,0,0,Math.PI*2);ctx.stroke();
+    ctx.font='13px "PingFang SC","Microsoft YaHei",sans-serif';
+    var tw=ctx.measureText(t.label).width;
+    var bx=x-tw/2-11,by=y-t.hh-40,bw=tw+22,bh=25;
+    ctx.fillStyle='rgba(255,250,240,.96)';rr(bx,by,bw,bh,12);ctx.fill();
+    ctx.strokeStyle='rgba(232,145,45,.8)';ctx.lineWidth=1.5;rr(bx,by,bw,bh,12);ctx.stroke();
+    ctx.fillStyle='#7A4B14';ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.fillText(t.label,x,by+12.5);
+    ctx.textAlign='start';ctx.textBaseline='alphabetic';
+    ctx.restore();
+  }
+
   var pDown=false,pDownX=0,pDownY_global=0,pDownCam=0,pDrag=0,activePointerId=null;
   var grabCat=null,grabMoved=false,grabDX=0,grabDY=0,dragPointer={x:0,y:0},edgeHintT=0,edgeDir=0;
   canvas.addEventListener('pointerdown',function(e){
-    pDown=true;pDownX=e.clientX;pDownY_global=e.clientY;pDownCam=camTarget;pDrag=0;grabMoved=false;
+    pDown=true;pDownX=e.clientX;pDownY_global=e.clientY;pDownCam=camTarget;pDrag=0;grabMoved=false;dropHover=null;
     activePointerId=e.pointerId;
     try{canvas.setPointerCapture(e.pointerId);}catch(err){}
     e.preventDefault();
@@ -3567,6 +3673,7 @@ h4{font-size:14px}
           dragPointer.y=p.y;
           grabCat.x=clamp(p.x+camX+grabDX,40,2700);
           grabCat.y=clamp(p.y+grabDY,240,510);
+          dropHover=dropTargetAt(grabCat.x,grabCat.y);
           canvas.style.cursor='grabbing';
           return;
         }
@@ -3585,16 +3692,14 @@ h4{font-size:14px}
     try{if(activePointerId!=null)canvas.releasePointerCapture(activePointerId);}catch(err){}
     activePointerId=null;
     if(grabCat&&grabMoved){
-      var gc=grabCat;grabCat=null;grabMoved=false;
+      var gc=grabCat;grabCat=null;grabMoved=false;dropHover=null;
       gc.held=false;gc.state='idle';gc.animT=0;gc.idleT=rnd(1,2.5);
       gc.x=clamp(gc.x,40,2700);gc.y=clamp(gc.y,240,510);
-      // 丢到澡盆上 → 直接洗澡
-      if(Math.abs(gc.x-BATH.x)<80&&Math.abs(gc.y-BATH.y)<70){
-        bathCat(gc,true);
-      }else{
-        bubble(gc,'喵~');
-        sfx('meow');
-      }
+      // 丢到可交互物体上 → 触发对应互动（吃饭/喝水/上厕所/洗澡/玩玩具/睡猫窝/啃猫草）
+      var tgt=dropTargetAt(gc.x,gc.y);
+      if(tgt&&tgt.run(gc)){save();return;}
+      bubble(gc,'喵~');
+      sfx('meow');
       save();
       return;
     }
@@ -3626,6 +3731,7 @@ h4{font-size:14px}
   window.addEventListener('pointercancel',function(e){
     if(!pDown&&!grabCat)return;
     pDown=false;
+    dropHover=null;
     if(grabCat){
       var gc=grabCat;grabCat=null;grabMoved=false;
       gc.held=false;gc.state='idle';gc.animT=0;
@@ -3750,7 +3856,8 @@ h4{font-size:14px}
           note('猫草：消消乐 ≥200 分得种子，种下 '+Math.round(CFG.catgrass.growSec/60)+' 分钟后长出，共 '+CFG.catgrass.bites+' 口；猫自己去啃，每口 心情 +'+CFG.catgrass.mood+'、健康 +'+CFG.catgrass.health),
           note('品牌猫粮：当天第一次吃饭 心情 +5；杂牌猫粮便宜，但 5% 概率拉肚子'),
           note('年龄：幼猫 <'+CFG.stage.kittenMax+' 天 · 未成年 <'+CFG.stage.teenMax+' 天 · 成年 <'+CFG.stage.adultMax+' 天 · 之后算老年'),
-          note('1 游戏天 = '+CFG.secPerDay+' 秒，每天结算一次上述涨跌')
+          note('拖动：按住小猫拖到食盆/水盆/猫砂盆/澡盆/玩具/猫草上，松手就会触发对应互动'),
+          note('每天结算一次上述涨跌（'+CFG.secPerDay+' 秒 = 1 个游戏天）'),
         ]);
   }
   var helpMask=document.getElementById('md-helpbox');
