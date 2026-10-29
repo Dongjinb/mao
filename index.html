@@ -311,7 +311,8 @@ h4{font-size:14px}
       groomCleanGain:8, treatDailyCap:5,
       bedSleepMood:2, treeMood:3,
       sleepHealthPerSec:0.45, bedSleepHealthMult:1.6,  // 睡觉回血：每秒回血，猫窝里更快
-      sleepHealBubbleMin:1                              // 一觉回血≥1 才提示
+      sleepHealBubbleMin:1,                             // 一觉回血≥1 才提示
+      sleepMaxPerDay:30                                 // 每只猫每天最多睡半天（1 游戏天=60 秒）
     },
     stage:{kittenMax:20, teenMax:60, adultMax:1440},
     shop:{
@@ -393,7 +394,7 @@ h4{font-size:14px}
   };
 
   var LW=920, LH=540, WALL=205, SAVE_KEY='meow-diary-v1';
-  var BOWL={x:150,y:507}, WBOWL={x:215,y:507}, LITTER={x:805,y:505};
+  var BOWL={x:150,y:507}, WBOWL={x:330,y:507}, LITTER={x:805,y:505};
   var BATH={x:470,y:476};
   var SEASONS=['spring','summer','autumn','winter'];
   var SEASON_LABEL={spring:'春',summer:'夏',autumn:'秋',winter:'冬'};
@@ -475,7 +476,7 @@ h4{font-size:14px}
       blinkT:rnd(2,5), blink:0, twitchT:0, bubbleT:rnd(8,20), bubble:null, bubbleLife:0,
       treatsToday:0, furToday:0, interacted:false, lastInteractReal:0, livelyWindows:0,
       brandToday:false, shownVomit:false, socialT:0, playMate:'', nailDays:0, wormDays:0, wormSeason:(o.wormSeason!=null?o.wormSeason:-1), held:false, heldBob:0,
-      sleepHeal:0
+      sleepHeal:0, sleepToday:num(o.sleepToday,0)
     };
   }
 
@@ -797,6 +798,7 @@ h4{font-size:14px}
     repairCats();
     for(var ci=0;ci<S.cats.length;ci++){
       var c=S.cats[ci];
+      c.sleepToday=0; // 新的一天重新拥有「半天」睡眠额度
       var st=stageOf(c.ageDays), prevStage=st;
       c.ageDays++;
       st=stageOf(c.ageDays);
@@ -1044,13 +1046,23 @@ h4{font-size:14px}
     if(r<32+22*nightFactor()){toSleep(c);return;}
     goTo(c,rnd(80,2680),rnd(245,505),'idle');
   }
+  function sleepQuotaLeft(c){
+    return Math.max(0,CFG.stats.sleepMaxPerDay-num(c.sleepToday,0));
+  }
   function toSleep(c){
+    if(sleepQuotaLeft(c)<=0){
+      // 睡够了：先去做点别的，偶尔才嘟囔一句，避免一直重复冒泡
+      c.idleT=Math.max(num(c.idleT,0),6+Math.random()*4);
+      if(Math.random()<0.3)bubble(c,'今天已经睡够了');
+      return false;
+    }
     var toys=S.facilities.toys;
     var bedFree=toys.bed&&toys.bed.dur>0&&!S.cats.some(function(o){return o!==c&&o.state==='sleep'&&o.sleepInBed;});
     c.sleepHeal=0;
     c.sleepInBed=!!bedFree;c.sleepDir=Math.random()<0.5?1:-1;
     if(bedFree)goTo(c,645+rnd(-6,6),318,'sleep');
     else goTo(c,rnd(140,2600),rnd(265,500),'sleep');
+    return true;
   }
   function dispenserFood(){var f=S.facilities.food;return f.brandUnits+f.cheapUnits;}
 
@@ -1152,6 +1164,14 @@ h4{font-size:14px}
           break;
         case 'sleep':{
           if(Math.random()<dt*1.1)spawn('zzz',c.x+c.sleepDir*14,c.y-46*scaleOf(c),{life:1.8,vy:-14});
+          c.sleepToday=num(c.sleepToday,0)+dt;
+          // 每天最多睡半天：额度用完就自然醒
+          if(c.sleepToday>=CFG.stats.sleepMaxPerDay){
+            var healedQ=c.sleepHeal||0;c.sleepHeal=0;
+            toIdle(c);
+            bubble(c,healedQ>=CFG.stats.sleepHealBubbleMin?('睡够了 健康+'+Math.round(healedQ)):'睡够了，起来活动');
+            break;
+          }
           // 睡觉恢复健康：在床上睡回得更快
           if(c.health<100){
             var healRate=CFG.stats.sleepHealthPerSec*(c.sleepInBed?CFG.stats.bedSleepHealthMult:1);
@@ -2999,7 +3019,7 @@ h4{font-size:14px}
       +'<button class="btn btn-sm" id="md-treat-vip" type="button">🎁进口×'+S.inventory.treatVip+'</button>'
       +'<button class="btn btn-sm" id="md-bath" type="button">🛁洗澡</button>'
       +'<button class="btn btn-sm" id="md-nail" type="button">💅剪指甲'+(c.nailDays>CFG.care.nailDays?'(!'+c.nailDays+'天)':'')+'</button>'
-      +'<button class="btn btn-sm" id="md-deworm" type="button">🪱驱虫¥'+CFG.care.dewormPrice+(isDewormOverdue(c)?'（本季度未驱虫）':'✓')+'</button>'
+      +'<button class="btn btn-sm" id="md-deworm" type="button">🪱驱虫¥'+CFG.care.dewormPrice+(isDewormOverdue(c)?'（本季度未驱虫）':'（本季度已驱）')+'</button>'
       +((S.inventory.catMeal+(S.inventory.catMealPlus||0))>0?'<button class="btn btn-sm" id="md-meal" type="button">🍳猫饭×'+(S.inventory.catMeal+(S.inventory.catMealPlus||0))+(S.inventory.catMealPlus>0?'（含金色×'+S.inventory.catMealPlus+'）':'')+'</button>':'')
       +(toyOpts?'<select class="form-select form-select-sm" id="md-toy" aria-label="选择玩具">'+toyOpts+'</select><button class="btn btn-sm" id="md-play" type="button">🎾 玩</button>':'')
       +(c.sick?'<button class="btn btn-sm" id="md-treat-sick" type="button">💊 治病 ¥200</button>':'')
@@ -3031,6 +3051,7 @@ h4{font-size:14px}
     });
     var wormBtn=panelRoomEl.querySelector('#md-deworm');
     if(wormBtn)wormBtn.addEventListener('click',function(){
+      if(!isDewormOverdue(c)){toast('🪱 '+c.name+' 本季度已经驱过虫了，下个季度再来');return;}
       if(S.coins<CFG.care.dewormPrice){toast('猫币不够（需'+CFG.care.dewormPrice+'）');return;}
       S.coins-=CFG.care.dewormPrice;
       c.wormDays=0;
@@ -3593,6 +3614,7 @@ h4{font-size:14px}
     var toy=S.facilities.toys[id];
     if(!toy||toy.dur<=0){toast('这个玩具已经坏了');return false;}
     if(id==='bed'){
+      if(sleepQuotaLeft(c)<=0){bubble(c,'已经睡够了');return false;}
       c.sleepInBed=true;c.sleepHeal=0;c.sleepDir=Math.random()<0.5?1:-1;
       dropState(c,'sleep',645+rnd(-6,6),318);
       bubble(c,'困了…');
@@ -3607,46 +3629,47 @@ h4{font-size:14px}
     return true;
   }
   function toyDropRunner(id){return function(c){return dropToy(c,id);};}
-  // 命中区域用矩形（贴近画出来的物件形状），避免食盆/水盆挨太近互相抢
+  // 命中区域是椭圆，中心比物件底部略高（拖猫时猫身压在物件上方，脚却落在下面）
   function dropTargets(){
     var list=[
-      {label:'🍚 吃饭',x:BOWL.x,y:BOWL.y-4,hw:34,hh:28,run:dropEat},
-      {label:'💧 喝水',x:WBOWL.x,y:WBOWL.y-4,hw:32,hh:28,run:dropDrink},
-      {label:'🧹 上厕所',x:LITTER.x,y:LITTER.y-8,hw:68,hh:38,run:dropToilet},
-      {label:'🛁 洗澡',x:BATH.x,y:BATH.y+8,hw:58,hh:34,run:dropBath},
-      {label:'🌿 啃猫草',x:1970,y:322,hw:52,hh:40,run:dropGrass}
+      {label:'🍚 吃饭',x:BOWL.x,cy:BOWL.y-30,rx:56,ry:46,run:dropEat},
+      {label:'💧 喝水',x:WBOWL.x,cy:WBOWL.y-30,rx:56,ry:46,run:dropDrink},
+      {label:'🧹 上厕所',x:LITTER.x,cy:LITTER.y-36,rx:84,ry:50,run:dropToilet},
+      {label:'🛁 洗澡',x:BATH.x,cy:BATH.y-24,rx:72,ry:48,run:dropBath},
+      {label:'🌿 啃猫草',x:1970,cy:300,rx:62,ry:46,run:dropGrass}
     ];
     for(var i=0;i<CFG.toys.length;i++){
       var t=CFG.toys[i];
       if(!S.facilities.toys[t.id])continue;
-      list.push({label:(t.id==='bed'?'😴 睡猫窝':'🎾 '+t.name),
-        x:(t.id==='bed'?645:t.x),y:(t.id==='bed'?318:(t.id==='tree'?300:t.y+6)),
-        hw:48,hh:38,run:toyDropRunner(t.id)});
+      var bed=t.id==='bed';
+      list.push({label:(bed?'😴 睡猫窝':'🎾 '+t.name),
+        x:(bed?645:t.x),cy:(bed?296:(t.id==='tree'?288:t.y-16)),
+        rx:54,ry:(t.id==='tree'?50:46),run:toyDropRunner(t.id)});
     }
     return list;
   }
   function dropTargetAt(x,y){
     var list=dropTargets(),best=null,bestD=2;
     for(var i=0;i<list.length;i++){
-      var t=list[i];
-      if(Math.abs(x-t.x)>t.hw||Math.abs(y-t.y)>t.hh)continue;
-      var d=Math.hypot((x-t.x)/t.hw,(y-t.y)/t.hh);
-      if(d<bestD){bestD=d;best=t;}
+      var t=list[i],dx=(x-t.x)/t.rx,dy=(y-t.cy)/t.ry;
+      var d=dx*dx+dy*dy;
+      if(d<=1&&d<bestD){bestD=d;best=t;}
     }
     return best;
   }
   function drawDropHover(){
     if(!dropHover||!grabCat||!grabMoved)return;
-    var t=dropHover,x=t.x-camX,y=t.y;
-    if(x<-180||x>LW+180)return;
+    var t=dropHover,x=t.x-camX,y=t.cy;
+    if(x<-200||x>LW+200)return;
     var pulse=0.5+0.5*Math.sin(T*6);
     ctx.save();
-    ctx.strokeStyle='rgba(232,145,45,'+(0.45+0.4*pulse).toFixed(3)+')';
-    ctx.lineWidth=3;
-    ctx.beginPath();ctx.ellipse(x,y+10,t.hw*0.85,15,0,0,Math.PI*2);ctx.stroke();
+    ctx.beginPath();ctx.ellipse(x,y,t.rx,t.ry,0,0,Math.PI*2);
+    ctx.fillStyle='rgba(232,145,45,'+(0.08+0.06*pulse).toFixed(3)+')';ctx.fill();
+    ctx.strokeStyle='rgba(232,145,45,'+(0.55+0.35*pulse).toFixed(3)+')';
+    ctx.lineWidth=2.5;ctx.stroke();
     ctx.font='13px "PingFang SC","Microsoft YaHei",sans-serif';
     var tw=ctx.measureText(t.label).width;
-    var bx=x-tw/2-11,by=y-t.hh-40,bw=tw+22,bh=25;
+    var bx=x-tw/2-11,by=y-t.ry-32,bw=tw+22,bh=25;
     ctx.fillStyle='rgba(255,250,240,.96)';rr(bx,by,bw,bh,12);ctx.fill();
     ctx.strokeStyle='rgba(232,145,45,.8)';ctx.lineWidth=1.5;rr(bx,by,bw,bh,12);ctx.stroke();
     ctx.fillStyle='#7A4B14';ctx.textAlign='center';ctx.textBaseline='middle';
@@ -3842,6 +3865,7 @@ h4{font-size:14px}
         ])
       + sec('❤️ 健康',[
           up('睡觉：+'+s.sleepHealthPerSec+'/秒，睡猫窝 ×'+s.bedSleepHealthMult+'（约 '+(s.sleepHealthPerSec*s.bedSleepHealthMult).toFixed(2)+'/秒）'),
+          note('每只猫每天最多睡半天（'+s.sleepMaxPerDay+' 秒），睡够了再拖到猫窝会提示「已经睡够了」'),
           up('洗澡 +'+b.healthGain+' · 猫草 +'+CFG.catgrass.health+' · 猫饭 +'+cm.feed.health),
           up('医院治病 +'+s.treatHealth+'；濒死急救后恢复到 '+s.rescueHealth),
           up('生病自愈：每天 '+pct(s.selfHealBase)+' + 当前健康×'+s.selfHealHealthFactor+' 的概率自己好（健康 100 时约 '+selfHealTop+'%）'),
@@ -3865,7 +3889,7 @@ h4{font-size:14px}
         ])
       + sec('🪮 护理与其他',[
           note('指甲超过 '+care.nailDays+' 天：猫会磨坏玩具，每次 −'+care.nailToyDamage+' 耐久（房间面板可剪指甲）'),
-          note('驱虫每季度 1 次（'+care.wormDays+' 天），超期生病概率更高'),
+          note('驱虫每季度 1 次（'+care.wormDays+' 天），超期生病概率更高；本季度已驱过时按钮会提示、不扣猫币'),
           note('猫草：消消乐 ≥200 分得种子，种下 '+Math.round(CFG.catgrass.growSec/60)+' 分钟后长出，共 '+CFG.catgrass.bites+' 口；猫自己去啃，每口 心情 +'+CFG.catgrass.mood+'、健康 +'+CFG.catgrass.health),
           note('毛毡工坊只在春/秋开放：其他季节游乐园里不显示工坊卡片，任务也不会派「接猫毛」'),
           note('品牌猫粮：当天第一次吃饭 心情 +5；杂牌猫粮便宜，但 5% 概率拉肚子'),
