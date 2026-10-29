@@ -435,6 +435,7 @@ h4{font-size:14px}
   }
   function catById(id){for(var i=0;i<S.cats.length;i++)if(S.cats[i].id===id)return S.cats[i];return null;}
   function seasonOf(day){return SEASONS[Math.floor(((day-1)%CFG.daysPerYear)/(CFG.daysPerYear/4))];}
+  function feltOpenOn(day){return CFG.felt.seasons.indexOf(seasonOf(day))>=0;}
   function stageOf(a){return a<=CFG.stage.kittenMax?'kitten':(a<=CFG.stage.teenMax?'teen':(a<=CFG.stage.adultMax?'adult':'elder'));}
   function stageLabel(a){var s=stageOf(a);return s==='kitten'?'幼猫':(s==='teen'?'少年':(s==='adult'?'成猫':'老年'));}
   function scaleOf(c){var a=Math.min(c.ageDays,CFG.stage.teenMax);var s=0.5+(a/CFG.stage.teenMax)*0.44;return Math.min(s,0.98);}
@@ -708,6 +709,8 @@ h4{font-size:14px}
   }
   function genQuests(st){
     var pool=CFG.quests.pool.slice();
+    // 毛毡工坊只在春秋开放：关季不派发「接猫毛」任务
+    if(!feltOpenOn(st.day))pool=pool.filter(function(q){return q.key!=='wool';});
     st.daily.quests=[];
     for(var i=0;i<CFG.quests.perSeason&&pool.length;i++){
       var q=pool.splice(Math.floor(Math.random()*pool.length),1)[0];
@@ -720,6 +723,12 @@ h4{font-size:14px}
     if(!st.daily.quests||!st.daily.quests.length||st.daily.questSeason!==w){
       genQuests(st);
       return true;
+    }
+    // 旧存档里若残留接猫毛任务、而当前季节工坊关闭，则重roll掉
+    if(!feltOpenOn(st.day)){
+      for(var i=0;i<st.daily.quests.length;i++){
+        if(st.daily.quests[i].key==='wool'){genQuests(st);return true;}
+      }
     }
     return false;
   }
@@ -1478,7 +1487,7 @@ h4{font-size:14px}
   }
 
   /* ================= 毛毡工坊 ================= */
-  function feltOpen(){return CFG.felt.seasons.indexOf(seasonOf(S.day))>=0;}
+  function feltOpen(){return feltOpenOn(S.day);}
   function makeMat(){
     if(!feltOpen()){toast('毛毡工坊只在春秋开放');return;}
     if(S.inventory.catFur<CFG.felt.furPerMaterial){toast('猫毛不够（需'+CFG.felt.furPerMaterial+'）');return;}
@@ -1796,6 +1805,7 @@ h4{font-size:14px}
   document.getElementById('md-wool-close').addEventListener('click',endWool);
   function startWool(){
     if(wool.on)return;
+    if(!feltOpen()){toast('毛毡工坊只在春秋开放，接猫毛暂不可用');return;}
     if((S.daily.woolRounds||0)<=0){toast('今天接猫毛次数用完了（每天 '+CFG.wool.roundsPerDay+' 次）');return;}
     wool.on=true;wool.t=CFG.wool.durationSec;wool.score=0;wool.items=[];wool.spawnT=0.4;
     wool.bx=320;wool.px=320;wool.combo=0;
@@ -3152,10 +3162,12 @@ h4{font-size:14px}
     if(panelPlayEl.dataset.sig===sig&&panelPlayEl.children.length>0)return;
     panelPlayEl.dataset.sig=sig;
     var felt=feltOpen();
-    var feltOpenTxt=felt?'春秋限定 · 开放中':'当前季节关闭（仅春/秋开放）';
-    var feltCard='<div class="md-play-card felt">'
+    // 毛毡工坊只在春秋开放：非开放季节整张卡片（含接猫毛入口）隐藏
+    var feltCard='';
+    if(felt){
+    feltCard='<div class="md-play-card felt">'
       +'<div class="md-felt-head"><span class="md-felt-title">🧶 毛毡工坊</span>'
-      +'<span class="md-badge'+(felt?' good':'')+'">'+feltOpenTxt+'</span></div>'
+      +'<span class="md-badge good">春秋限定 · 开放中</span></div>'
       +'<div class="md-felt-res">'
       +'<div class="md-felt-chip">🐾 猫毛 <b>'+S.inventory.catFur+'</b></div>'
       +'<div class="md-felt-arrow">→</div>'
@@ -3181,6 +3193,7 @@ h4{font-size:14px}
         +'</div></div>';
     }
     feltCard+='</div></div>';
+    }
     // 做猫饭厨房
     var ingBtns='',ingOpts='';
     for(var j=0;j<CFG.catmeal.ingredients.length;j++){
@@ -3854,6 +3867,7 @@ h4{font-size:14px}
           note('指甲超过 '+care.nailDays+' 天：猫会磨坏玩具，每次 −'+care.nailToyDamage+' 耐久（房间面板可剪指甲）'),
           note('驱虫每季度 1 次（'+care.wormDays+' 天），超期生病概率更高'),
           note('猫草：消消乐 ≥200 分得种子，种下 '+Math.round(CFG.catgrass.growSec/60)+' 分钟后长出，共 '+CFG.catgrass.bites+' 口；猫自己去啃，每口 心情 +'+CFG.catgrass.mood+'、健康 +'+CFG.catgrass.health),
+          note('毛毡工坊只在春/秋开放：其他季节游乐园里不显示工坊卡片，任务也不会派「接猫毛」'),
           note('品牌猫粮：当天第一次吃饭 心情 +5；杂牌猫粮便宜，但 5% 概率拉肚子'),
           note('年龄：幼猫 <'+CFG.stage.kittenMax+' 天 · 未成年 <'+CFG.stage.teenMax+' 天 · 成年 <'+CFG.stage.adultMax+' 天 · 之后算老年'),
           note('拖动：按住小猫拖到食盆/水盆/猫砂盆/澡盆/玩具/猫草上，松手就会触发对应互动'),
