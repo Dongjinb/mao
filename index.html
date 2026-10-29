@@ -4017,6 +4017,20 @@ h4{font-size:14px}
     if(!c){c=cloudGenCode();cloudCodeSet(c);}
     return c;
   }
+  // 云开发只给白名单里的来源放行：本机文件、127.0.0.1、云开发自己的域名；其它公网域名（如 github.io）免费套餐加不进去
+  function cloudOriginState(){
+    if(location.protocol==='file:')return 'file';
+    var h=String(location.hostname||'');
+    if(h==='127.0.0.1'||h==='localhost'||h==='::1')return 'local';
+    if(/\.tcloudbaseapp\.com$/i.test(h)||/\.app\.tcloudbase\.com$/i.test(h)||/\.tcb\.qcloud\.com$/i.test(h))return 'cloud';
+    return 'other';
+  }
+  function cloudOriginTip(){
+    var s=cloudOriginState();
+    if(s==='file')return '现在是直接双击打开的文件，浏览器不允许它联网，云同步会被拦。双击同目录的「启动云存档.bat」，用 http://127.0.0.1:8123/ 打开就能正常同步。';
+    if(s==='other')return '当前域名 '+location.hostname+' 不在云开发的安全域名白名单里（免费套餐加不进去），浏览器跨域会被拦。云同步请用同目录的「启动云存档.bat」打开 http://127.0.0.1:8123/ 再操作。';
+    return '';
+  }
   function cloudErrText(e){
     if(!e)return '未知错误';
     var raw=(typeof e==='string')?(e):(e.message||e.errMsg||e.error_description||e.code||JSON.stringify(e));
@@ -4026,8 +4040,10 @@ h4{font-size:14px}
       return '云端拒绝执行：'+CLOUD_RPC_GET+' / '+CLOUD_RPC_PUT+' 的授权没配好（原始：'+short+'）';
     if(/PGRST202|function .* does not exist|could not find the function/i.test(raw))
       return '云端还没有存档函数，数据库迁移没执行成功（原始：'+short+'）';
-    if(/Failed to fetch|NetworkError|Load failed|CORS|blocked by/i.test(raw))
-      return '云端请求没发出去：浏览器拦了跨域（本机文件 file:// 不允许联网）。双击同目录的「启动云存档.bat」，用 http://127.0.0.1:8123/ 打开即可（原始：'+short+'）';
+    if(/Failed to fetch|NetworkError|Load failed|CORS|blocked by/i.test(raw)){
+      var ot=cloudOriginTip();
+      return '云端请求没发出去：'+(ot||'浏览器拦了跨域请求')+'（原始：'+short+'）';
+    }
     if(/401|UNAUTHENTICATED|credentials not found|invalid api key/i.test(raw))
       return '密钥无效或与环境不匹配，点「高级设置」核对（原始：'+short+'）';
     if(/invalid env|env not found|INVALID_ENV/i.test(raw))
@@ -4156,8 +4172,8 @@ h4{font-size:14px}
     var cfg=cloudCfg(), code=cloudCodeGet(), st=cloudStatusLine();
     var h='';
     h+='<div class="md-cloud-status '+st.cls+'" id="md-cloud-status">'+cloudEsc(st.text)+'</div>';
-    if(location.protocol==='file:')
-      h+='<div class="md-cloud-status err">⚠ 现在是直接双击打开的文件，浏览器不允许它联网，云同步会被拦。双击同目录的「启动云存档.bat」，用 http://127.0.0.1:8123/ 打开就能正常同步。</div>';
+    if(cloudOriginState()!=='local'&&cloudOriginState()!=='cloud')
+      h+='<div class="md-cloud-status err">⚠ '+cloudEsc(cloudOriginTip())+'</div>';
     h+='<div class="md-cloud-row">';
     h+='<button class="btn btn-sm btn-primary" data-act="upload" type="button">⬆ 上传存档</button>';
     h+='<button class="btn btn-sm" data-act="fetch" type="button">⬇ 从云端恢复</button>';
