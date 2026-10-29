@@ -433,6 +433,7 @@ h4{font-size:14px}
       c.mood=stat100(c.mood,80); c.clean=stat100(c.clean,95); c.health=stat100(c.health,100);
       c.favor=stat100(c.favor,CFG.favorInit);
     }
+    pruneToys();
   }
   function catById(id){for(var i=0;i<S.cats.length;i++)if(S.cats[i].id===id)return S.cats[i];return null;}
   function seasonOf(day){return SEASONS[Math.floor(((day-1)%CFG.daysPerYear)/(CFG.daysPerYear/4))];}
@@ -895,12 +896,10 @@ h4{font-size:14px}
       if(c.nailDays!=null){
         c.nailDays++;
         if(c.nailDays>CFG.care.nailDays){
-          var toysDict=S.facilities.toys;
-          for(var tk in toysDict){
-            var toyDef=null;
-            for(var ti2=0;ti2<CFG.toys.length;ti2++)if(CFG.toys[ti2].id===tk)toyDef=CFG.toys[ti2];
-            if(toyDef&&toyDef.id!=='tree')toysDict[tk].dur=Math.max(0,toysDict[tk].dur-CFG.care.nailToyDamage);
-          }
+          var toyKs=[];for(var tk in S.facilities.toys)toyKs.push(tk);
+          var brokeN=0;
+          for(var tki=0;tki<toyKs.length;tki++)if(toyKs[tki]!=='tree'&&damageToy(toyKs[tki],CFG.care.nailToyDamage))brokeN++;
+          if(brokeN>0)toast('💅 指甲磨坏了 '+brokeN+' 个玩具，已经扔掉');
           if(!c._nailWarned){c._nailWarned=true;toast('💅 '+c.name+' 指甲太长了，正在磨坏玩具（房间面板可剪指甲）');}
         }
       }
@@ -1199,9 +1198,8 @@ h4{font-size:14px}
         case 'play':{
           if(c.animT<0.12&&c.playMate)bubble(c,'和'+c.playMate+'打闹');
           if(c.animT>5){
-            var tt=S.facilities.toys[c.usingToy];
-            if(tt)tt.dur=Math.max(0,tt.dur-1);
-            if(tt&&tt.dur<=0){log(c.usingToy+' 玩具损坏了');delete S.facilities.toys[c.usingToy];}
+            var tid=c.usingToy, tdef2=toyDefOf(tid);
+            if(damageToy(tid,1))bubble(c,'玩坏了一个'+(tdef2?tdef2.name:'玩具'));
             var moodGain=c.personality==='lively'?CFG.toyMood.lively:(c.personality==='introvert'?CFG.toyMood.introvert:CFG.toyMood.base);
             if(c.personality==='grumpy'){
               if(c.hostility>0&&Math.random()<CFG.toyMood.grumpyHissChance){c.state='hiss';c.animT=0;bubble(c,'呲——');c.hostility=clamp(c.hostility+CFG.personality.hissHostilityGain,0,100);break;}
@@ -1350,6 +1348,31 @@ h4{font-size:14px}
     bumpQuest('bath');
     sfx('click');
     save();
+  }
+
+  function toyDefOf(id){
+    for(var i=0;i<CFG.toys.length;i++)if(CFG.toys[i].id===id)return CFG.toys[i];
+    return null;
+  }
+  // 统一扣玩具耐久：耐久归零就彻底消失（旧存档里卡在 0 的玩具也会被清掉）
+  function damageToy(id,amt){
+    var t=S.facilities.toys[id];if(!t)return false;
+    t.dur=Math.max(0,num(t.dur,0)-num(amt,1));
+    if(t.dur>0)return false;
+    var d=toyDefOf(id);
+    delete S.facilities.toys[id];
+    S.cats.forEach(function(c){
+      if(c.usingToy===id)c.usingToy=null;
+      if(id==='bed'&&c.sleepInBed)c.sleepInBed=false;
+    });
+    log('🎾 '+(d?d.name:id)+' 用坏了，已经扔掉');
+    return true;
+  }
+  function pruneToys(){
+    if(!S||!S.facilities||!S.facilities.toys)return;
+    var ids=[];
+    for(var k in S.facilities.toys)ids.push(k);
+    for(var i=0;i<ids.length;i++)if(!(num(S.facilities.toys[ids[i]].dur,0)>0))damageToy(ids[i],0);
   }
 
   function playToy(c,toyId){
@@ -3889,6 +3912,7 @@ h4{font-size:14px}
         ])
       + sec('🪮 护理与其他',[
           note('指甲超过 '+care.nailDays+' 天：猫会磨坏玩具，每次 −'+care.nailToyDamage+' 耐久（房间面板可剪指甲）'),
+          note('玩具耐久用光就会坏掉消失（玩一次 −1，猫窝/猫爬架不参与磨爪），需要重新买'),
           note('驱虫每季度 1 次（'+care.wormDays+' 天），超期生病概率更高；本季度已驱过时按钮会提示、不扣猫币'),
           note('猫草：消消乐 ≥200 分得种子，种下 '+Math.round(CFG.catgrass.growSec/60)+' 分钟后长出，共 '+CFG.catgrass.bites+' 口；猫自己去啃，每口 心情 +'+CFG.catgrass.mood+'、健康 +'+CFG.catgrass.health),
           note('毛毡工坊只在春/秋开放：其他季节游乐园里不显示工坊卡片，任务也不会派「接猫毛」'),
