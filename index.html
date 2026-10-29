@@ -44,6 +44,7 @@ h4{font-size:14px}
       <span class="md-stat md-warn" id="md-scratch" hidden>⚠ 被挠伤</span>
       <button class="btn btn-ghost btn-xs" id="md-bgm" type="button">🎵</button>
       <button class="btn btn-ghost btn-xs" id="md-sfx" type="button">🔊</button>
+      <button class="btn btn-ghost btn-xs" id="md-help" type="button" aria-haspopup="dialog">❓ 帮助</button>
       <button class="btn btn-ghost btn-xs" id="md-reset" type="button">重新开始</button>
     </div>
   </div>
@@ -83,6 +84,17 @@ h4{font-size:14px}
     <button class="btn btn-sm" id="md-refill" type="button">🍚 补粮 <span class="md-dim" id="md-food-left"></span></button>
     <button class="btn btn-sm" id="md-scoop" type="button">🧹 铲屎 <span class="md-dim" id="md-litter-left"></span></button>
     <button class="btn btn-sm" id="md-water" type="button">💧 换水 <span class="md-dim" id="md-water-left"></span></button>
+  </div>
+
+  <div class="md-help-mask" id="md-helpbox" hidden>
+    <div class="md-help-panel" role="dialog" aria-modal="true" aria-labelledby="md-help-title">
+      <div class="md-help-head">
+        <h4 id="md-help-title">📖 猫咪数值涨跌一览</h4>
+        <button class="btn btn-xs" id="md-help-close" type="button">关闭 ✕</button>
+      </div>
+      <div class="md-help-body" id="md-help-body"></div>
+      <div class="md-help-foot md-dim">1 游戏天 = 60 秒 · 各项数值 0~100 封顶 · 房间面板里的进度条就是实时数值</div>
+    </div>
   </div>
 
   <div class="md-lower">
@@ -249,6 +261,25 @@ h4{font-size:14px}
       #meow-diary .md-facility-row{gap:6px;}
       #meow-diary .md-scenes{margin-right:0;}
     }
+
+    /* ===== 帮助浮层 ===== */
+    #meow-diary .md-help-mask[hidden]{display:none !important;}
+    #meow-diary .md-help-mask{position:fixed;inset:0;z-index:200;background:rgba(47,42,51,.45);display:flex;align-items:center;justify-content:center;padding:14px;}
+    #meow-diary .md-help-panel{width:min(820px,100%);max-height:88vh;display:flex;flex-direction:column;background:var(--card);border:1px solid var(--border);border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,.28);overflow:hidden;}
+    #meow-diary .md-help-head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 16px;border-bottom:1px solid var(--border);background:var(--muted);}
+    #meow-diary .md-help-head h4{margin:0;font-weight:600;font-size:15px;}
+    #meow-diary .md-help-body{padding:12px 16px 4px;overflow:auto;-webkit-overflow-scrolling:touch;}
+    #meow-diary .md-help-sec{margin:0 0 12px;}
+    #meow-diary .md-help-sec h5{margin:0 0 4px;font-size:14px;display:flex;align-items:center;gap:6px;}
+    #meow-diary .md-help-row{display:flex;gap:8px;padding:4px 0;border-bottom:1px dashed rgba(0,0,0,.07);font-size:13px;line-height:1.55;}
+    #meow-diary .md-help-row:last-child{border-bottom:0;}
+    #meow-diary .md-help-tag{flex:0 0 auto;width:18px;text-align:center;font-weight:700;}
+    #meow-diary .md-help-up{color:#4C9A4C;}
+    #meow-diary .md-help-down{color:#C0504D;}
+    #meow-diary .md-help-note{color:var(--muted-foreground);}
+    #meow-diary .md-help-foot{padding:10px 16px;border-top:1px solid var(--border);font-size:12px;background:var(--muted);}
+    #meow-diary .md-help-panel .md-help-body b{color:var(--foreground);}
+    body.md-help-open{overflow:hidden;}
   </style>
 
   <script>
@@ -1519,34 +1550,45 @@ h4{font-size:14px}
     sfx('click');
     save();
   }
-  // quality: 'perfect' | 'good' | 'miss'（判定条结果）
-  function cookMeal(a,b,quality){
+  // quality: 'perfect' | 'good' | 'miss'（判定条结果）；qty: 一次做的份数（1 份 = 两种食材各 1 个）
+  function cookMeal(a,b,quality,qty){
     if(a===b){toast('要选两种不同食材');return;}
-    if(S.inventory[a]<=0||S.inventory[b]<=0){toast('食材不够，先购买');return;}
-    S.inventory[a]--;S.inventory[b]--;
+    var cap=Math.min(num(S.inventory[a],0),num(S.inventory[b],0));
+    if(cap<=0){toast('食材不够，先购买');return;}
+    var n=clamp(Math.floor(num(qty,1)),1,cap);
+    S.inventory[a]-=n;S.inventory[b]-=n;
     var key=[a,b].sort().join('+');
     var ok=CFG.catmeal.recipes.some(function(r){return r.slice().sort().join('+')===key;});
     if(ok){
       var q=quality||'good';
       if(q==='perfect'){
-        S.inventory.catMeal++;
         // 完美猫饭单独计数：喂食效果更强
-        S.inventory.catMealPlus=(S.inventory.catMealPlus||0)+1;
-        S.inventory.catMeal--;
-        toast('🌟 完美刀工！做出了金色猫饭（喂食效果更强）');
-        log('做出金色猫饭');
+        S.inventory.catMealPlus=(S.inventory.catMealPlus||0)+n;
+        toast(n>1?'🌟 完美刀工！做出了金色猫饭 ×'+n+'（喂食效果更强）':'🌟 完美刀工！做出了金色猫饭（喂食效果更强）');
+        log('做出金色猫饭×'+n);
         sfx('success');
       }else if(q==='good'){
-        S.inventory.catMeal++;
-        toast('🍳 做出了香喷喷的猫饭！');
+        S.inventory.catMeal+=n;
+        toast(n>1?'🍳 做出了香喷喷的猫饭 ×'+n+'！':'🍳 做出了香喷喷的猫饭！');
         sfx('success');
       }else{
-        // 手滑：食材浪费一半
-        if(Math.random()<CFG.cooking.miss){S.inventory.catMeal++;toast('🍳 慢吞吞地做出了猫饭（勉强能用）');sfx('pop');}
-        else{S.inventory.darkFood++;toast('💀 手一抖，食材烧糊了…');sfx('hiss');}
+        // 手滑：逐份判定，糊掉的那份变成黑暗料理
+        var good=0,bad=0;
+        for(var i=0;i<n;i++){
+          if(Math.random()<CFG.cooking.miss)good++;
+          else bad++;
+        }
+        if(good)S.inventory.catMeal+=good;
+        if(bad)S.inventory.darkFood+=bad;
+        if(good>0&&bad>0)toast('🍳 慢吞吞做出了猫饭×'+good+'，烧糊×'+bad);
+        else if(good>0)toast('🍳 慢吞吞地做出了猫饭 ×'+good+'（勉强能用）');
+        else toast('💀 手一抖，'+n+' 份食材全烧糊了…');
+        sfx(good>0?'pop':'hiss');
       }
     }else{
-      S.inventory.darkFood++;toast('💀 配方不对，黑暗料理诞生了…（可卖 '+CFG.catmeal.darkSell+'）');sfx('pop');
+      S.inventory.darkFood+=n;
+      toast('💀 配方不对，'+(n>1?'这 '+n+' 份搭配都是':'')+'黑暗料理…（可卖 '+CFG.catmeal.darkSell+'）');
+      sfx('pop');
     }
     save();
   }
@@ -1674,15 +1716,16 @@ h4{font-size:14px}
   }
 
   /* ================= 猫饭判定条 ================= */
-  var cookbar={on:false,pos:0,dir:1,a:'liver',b:'radish',raf:0,last:0};
+  var cookbar={on:false,pos:0,dir:1,a:'liver',b:'radish',qty:1,raf:0,last:0};
   var cookbarBox=document.getElementById('md-cookbar');
   var cookbarCursor=document.getElementById('md-cookbar-cursor');
-  function startCookbar(a,b){
+  function startCookbar(a,b,qty){
     if(cookbar.on)return;
     a=a||cookbar.a;b=b||cookbar.b;
     if(S.inventory[a]<=0||S.inventory[b]<=0){toast('食材不够，先购买');return;}
     if(a===b){toast('要选两种不同食材');return;}
     cookbar.a=a;cookbar.b=b;
+    cookbar.qty=clamp(Math.floor(num(qty,1)),1,Math.min(num(S.inventory[a],1),num(S.inventory[b],1)));
     cookbar.on=true;cookbar.pos=0;cookbar.dir=1;cookbar.last=0;
     cookbarBox.hidden=false;
     scrollGameIntoView();
@@ -1710,7 +1753,7 @@ h4{font-size:14px}
     cookbar.on=false;
     clearInterval(cookbar.raf);
     cookbarBox.hidden=true;
-    cookMeal(cookbar.a,cookbar.b,q);
+    cookMeal(cookbar.a,cookbar.b,q,cookbar.qty);
     if(panelPlayEl)panelPlayEl.dataset.sig='';
   }
   cookbarBox.addEventListener('pointerdown',function(e){
@@ -1722,7 +1765,7 @@ h4{font-size:14px}
     e.stopPropagation();
     if(!cookbar.on)return;
     cookbar.on=false;clearInterval(cookbar.raf);cookbarBox.hidden=true;
-    cookMeal(cookbar.a,cookbar.b,'good');
+    cookMeal(cookbar.a,cookbar.b,'good',cookbar.qty);
     if(panelPlayEl)panelPlayEl.dataset.sig='';
   });
 
@@ -3088,6 +3131,8 @@ h4{font-size:14px}
 
   // 猫饭食材选择（记住用户选择，避免重建时被重置）
   var mealA='liver', mealB='radish', mealBusyUntil=0;
+  // 一次做几份：默认跟随食材上限（mealQtyAuto），用户手动改过就锁定手动值
+  var mealQty=1, mealQtyAuto=true;
   function playSig(){
     var inv=S.inventory;
     return [Math.floor(S.coins/10), S.daily.fishRounds, seasonOf(S.day),
@@ -3143,15 +3188,20 @@ h4{font-size:14px}
       ingOpts+='<option value="'+ing.id+'">'+ing.name+'×'+S.inventory[ing.id]+'</option>';
     }
     var mealCard='<div class="md-play-card"><h4>🍳 猫饭厨房</h4>'
-      +'<div class="md-dim" style="margin-bottom:6px">配方：猪肝+萝卜 / 鸡心+南瓜 / 猪肝+南瓜 → 猫饭；其他组合=黑暗料理。选好食材点「开始烹饪」，在滑块进入绿色区域时点击，刀工完美可出金色猫饭！</div>'
+      +'<div class="md-dim" style="margin-bottom:6px">配方：猪肝+萝卜 / 鸡心+南瓜 / 猪肝+南瓜 → 猫饭；其他组合=黑暗料理。选好食材和份数点「开始烹饪」，在滑块进入绿色区域时点击，刀工完美可出金色猫饭！份数上限 = 两种食材里剩得少的那个，买多少就能一次做多少份。</div>'
       +'<div class="md-ing-row">'+ingBtns+'</div>'
       +'<div class="md-ing-row">'
       +'<select class="form-select form-select-sm" id="md-meat-a" aria-label="食材一">'+ingOpts+'</select>'
       +'<select class="form-select form-select-sm" id="md-meat-b" aria-label="食材二">'+ingOpts+'</select>'
+      +'<select class="form-select form-select-sm" id="md-qty" aria-label="做几份"></select>'
       +'<button class="btn btn-sm btn-primary" id="md-cook" type="button">🔪 开始烹饪</button>'
+      +'<span class="md-dim" id="md-qty-hint"></span>'
+      +'</div>'
+      +'<div class="md-ing-row">'
       +'<span class="md-dim">猫饭×'+S.inventory.catMeal+' · 金色猫饭×'+(S.inventory.catMealPlus||0)+' · 黑暗×'+S.inventory.darkFood+'</span>'
       +'<button class="btn btn-sm" data-sellinv="catMeal:'+CFG.catmeal.mealSell+'" type="button" '+(S.inventory.catMeal>0?'':'disabled')+'>卖猫饭¥'+CFG.catmeal.mealSell+'</button>'
       +'<button class="btn btn-sm" data-sellinv="darkFood:'+CFG.catmeal.darkSell+'" type="button" '+(S.inventory.darkFood>0?'':'disabled')+'>卖黑暗¥'+CFG.catmeal.darkSell+'</button>'
+      +'<span class="md-dim">用全部余量：把「份数」选成最大值即可一次做完</span>'
       +'</div>'
       +'<div class="md-dim">喂猫饭：到「房间」选中小猫后点"🍳猫饭"按钮 · 金色猫饭效果 1.5 倍</div>'
       +'</div>';
@@ -3171,14 +3221,33 @@ h4{font-size:14px}
       +matchCard;
     // 恢复食材下拉的选择（iOS 上不会因重建跳回第一个）
     var sa0=panelPlayEl.querySelector('#md-meat-a'), sb0=panelPlayEl.querySelector('#md-meat-b');
+    var qtySel=panelPlayEl.querySelector('#md-qty'), qtyHint=panelPlayEl.querySelector('#md-qty-hint');
+    var mealCap=function(){
+      var a=(sa0?sa0.value:mealA), b=(sb0?sb0.value:mealB);
+      return Math.max(0,Math.min(num(S.inventory[a],0),num(S.inventory[b],0)));
+    };
+    var refreshQty=function(){
+      if(!qtySel)return;
+      var cap=mealCap(), maxN=Math.max(1,cap), k, o='';
+      if(mealQtyAuto)mealQty=maxN;
+      mealQty=clamp(Math.round(num(mealQty,1)),1,maxN);
+      for(k=1;k<=maxN;k++)o+='<option value="'+k+'"'+(k===mealQty?' selected':'')+'>'+k+' 份</option>';
+      qtySel.innerHTML=cap<=0?'<option value="0">0 份</option>':o;
+      qtySel.disabled=cap<=0;
+      if(qtyHint)qtyHint.textContent=cap<=0?'食材不够，先买食材':('最多可做 ×'+maxN+' 份');
+      var cb=panelPlayEl.querySelector('#md-cook');
+      if(cb)cb.disabled=cap<=0;
+    };
     if(sa0&&sb0){
       sa0.value=mealA; sb0.value=mealB;
       var markBusy=function(){mealBusyUntil=Date.now()+2500;};
       ['pointerdown','touchstart','mousedown','focus'].forEach(function(ev){sa0.addEventListener(ev,markBusy,{passive:true});sb0.addEventListener(ev,markBusy,{passive:true});});
-      sa0.addEventListener('change',function(){mealA=sa0.value;});
-      sb0.addEventListener('change',function(){mealB=sb0.value;});
+      sa0.addEventListener('change',function(){mealA=sa0.value;refreshQty();});
+      sb0.addEventListener('change',function(){mealB=sb0.value;refreshQty();});
       sa0.addEventListener('blur',function(){mealA=sa0.value;});
       sb0.addEventListener('blur',function(){mealB=sb0.value;});
+      if(qtySel)qtySel.addEventListener('change',function(){mealQty=parseInt(qtySel.value,10)||1;mealQtyAuto=false;});
+      refreshQty();
     }
     if(scroller)scroller.scrollTop=keepScroll;
     panelPlayEl.querySelector('#md-fish-start').addEventListener('click',startFish);
@@ -3197,7 +3266,11 @@ h4{font-size:14px}
       var sa=panelPlayEl.querySelector('#md-meat-a'),sbb=panelPlayEl.querySelector('#md-meat-b');
       if(sa)mealA=sa.value;
       if(sbb)mealB=sbb.value;
-      startCookbar(mealA,mealB);
+      var cap=mealCap();
+      if(cap<=0){toast('食材不够，先购买');return;}
+      var n=clamp(parseInt(qtySel?qtySel.value:'1',10)||1,1,cap);
+      mealQty=n;
+      startCookbar(mealA,mealB,n);
       panelPlayEl.dataset.sig='';
     });
     var sv=panelPlayEl.querySelectorAll('button[data-sellinv]');
@@ -3599,6 +3672,108 @@ h4{font-size:14px}
   window.__mdSkip=function(n){for(var i=0;i<n;i++){S.timeSec+=CFG.secPerDay;settleDay();}};
   window.__mdQ=function(){return {quests:S.daily.quests,date:S.daily.questSeason,day:S.day};};
   window.__mdGrass=function(){S.grass={stage:2,plantedAt:T-999,bites:CFG.catgrass.bites};};
+
+  /* ================= 帮助：猫咪数值涨跌 ================= */
+  function helpHTML(){
+    var s=CFG.stats, cm=CFG.catmeal, b=CFG.bath, p=CFG.personality, t=CFG.toyMood, H=CFG.hospital, care=CFG.care;
+    var up=function(x){return '<div class="md-help-row"><span class="md-help-tag md-help-up">↑</span><span>'+x+'</span></div>';};
+    var down=function(x){return '<div class="md-help-row"><span class="md-help-tag md-help-down">↓</span><span>'+x+'</span></div>';};
+    var note=function(x){return '<div class="md-help-row"><span class="md-help-tag md-help-note">·</span><span>'+x+'</span></div>';};
+    var sec=function(title,rows){return '<div class="md-help-sec"><h5>'+title+'</h5>'+rows.join('')+'</div>';};
+    var pct=function(v){return Math.round(v*100)+'%';};
+    var goldHunger=Math.round(cm.feed.hunger*1.5), goldMood=Math.round(cm.feed.mood*1.5);
+    var selfHealTop=Math.round((s.selfHealBase+s.selfHealHealthFactor)*100);
+    return ''
+      + sec('🍚 饱食',[
+          up('自己吃饭：饿了自己走到粮碗，吃完回满 100（一餐最多消耗 10 粮单位）'),
+          up('猫条 +8 · 猫饭 +'+cm.feed.hunger+'（金色猫饭 '+goldHunger+'）'),
+          note('喂猫饭：在房间面板选中小猫后点「🍳 猫饭」'),
+          up('幼猫喝母乳 +'+s.kitten.nurseGain),
+          down('每天 −'+s.hungerPerDay.base+'（夏天 −'+s.hungerPerDay.summer+'）'),
+          down('幼猫没母乳 −'+s.kitten.orphanHunger+'/天，并 −'+s.kitten.orphanHealth+' 健康'),
+          down('哺乳中的母猫额外 −'+s.kitten.motherExtraHunger+'/天')
+        ])
+      + sec('💧 水分',[
+          up('渴了自己去水盆喝，喝完回满 100'),
+          up('换水免费，换完水盆干净度 100'),
+          down('水脏了（'+s.waterDirtyAfterDays+' 天没换水）每天 −'+s.waterPerDay+'，并 −'+s.health.waterDirty+' 健康、−'+s.cleanWaterPenalty+' 清洁'),
+          note('水干净时每天结算会回满，所以勤换水就不会缺水')
+        ])
+      + sec('😊 心情',[
+          up('抚摸：活泼猫 +'+p.pet.lively+' · 耄耋猫 +'+p.pet.grumpy+' · 内向猫 '+p.pet.introvert+'（内向不喜欢被摸）'),
+          up('玩玩具：活泼 +'+t.lively+' · 内向 +'+t.introvert+' · 耄耋 +'+t.grumpy+'；两只一起玩再 +'+CFG.social.mood),
+          up('猫条 +'+CFG.shop.treats.normal.mood+' / +'+CFG.shop.treats.good.mood+' / +'+CFG.shop.treats.vip.mood+'（普通 / 好 / 进口）'),
+          up('猫饭 +'+cm.feed.mood+'（金色 '+goldMood+'）· 猫草 +'+CFG.catgrass.mood),
+          up('猫爬架 +'+s.treeMood+'/天 · 猫窝 +'+s.bedSleepMood+'/天（买下即生效）'),
+          up('内向猫当天没被打扰 +'+s.introvertQuietGain+'/天'),
+          up('买新玩具：全屋每只 +5'),
+          down('每天 −'+s.moodPerDay.base+'（未成年 −'+s.moodPerDay.teen+'）'),
+          down('洗澡：洗完 −'+Math.abs(b.moodBase)+'（内向 −'+Math.abs(b.moodIntrovert)+'、耄耋 −'+Math.abs(b.moodGrumpy)+'）'),
+          down('猫砂盆满了 −'+s.litter.fullMoodPenalty+'/天'),
+          down('活泼猫 '+Math.round(s.livelyWindowSec/60)+' 分钟没互动 −'+s.livelyMoodLoss),
+          down('吃杂牌粮拉肚子 −5')
+        ])
+      + sec('🧼 清洁',[
+          up('舔毛：每舔完一次 +'+s.groomCleanGain),
+          up('洗澡：洗完回满 100（免费）'),
+          down('一天没铲屎 −'+s.cleanLitterPenalty+'/天'),
+          down('猫砂盆满了再 −'+s.litter.fullCleanPenalty+'/天'),
+          down('水脏 −'+s.cleanWaterPenalty+'/天'),
+          note('清洁度 <'+b.dirtyAuto+' 时猫会自己跑去澡盆洗澡')
+        ])
+      + sec('❤️ 健康',[
+          up('睡觉：+'+s.sleepHealthPerSec+'/秒，睡猫窝 ×'+s.bedSleepHealthMult+'（约 '+(s.sleepHealthPerSec*s.bedSleepHealthMult).toFixed(2)+'/秒）'),
+          up('洗澡 +'+b.healthGain+' · 猫草 +'+CFG.catgrass.health+' · 猫饭 +'+cm.feed.health),
+          up('医院治病 +'+s.treatHealth+'；濒死急救后恢复到 '+s.rescueHealth),
+          up('生病自愈：每天 '+pct(s.selfHealBase)+' + 当前健康×'+s.selfHealHealthFactor+' 的概率自己好（健康 100 时约 '+selfHealTop+'%）'),
+          down('饿到 0：−'+s.health.hungerZero+'/天'),
+          down('清洁度 <'+s.cleanLowThreshold+'：−'+s.health.cleanLow+'/天'),
+          down('水脏：−'+s.health.waterDirty+'/天'),
+          down('生病中：−'+s.health.sick+'/天'),
+          down('生病概率：健康 <'+s.health.lowHealthThreshold+' 时 +'+pct(s.health.sickChanceLowHealth)+'/天；成年未打疫苗 +'+pct(s.health.unvaccAdult)+'；老年 +'+pct(s.health.elderExtra)+'；近亲 +'+pct(s.health.inbredExtra)+'；驱虫超期 +'+pct(s.health.elderExtra)),
+          note('健康降到 0 会濒死：'+s.nearDeathDays+' 游戏天内花 '+H.emergency+' 猫币急救，否则死亡')
+        ])
+      + sec('💗 好感',[
+          up('猫条 +'+CFG.shop.treats.normal.favor+' / +'+CFG.shop.treats.good.favor+' / +'+CFG.shop.treats.vip.favor+'（普通 / 好 / 进口）'),
+          note('每只猫每天最多吃 '+s.treatDailyCap+' 根猫条'),
+          note('初始 '+CFG.favorInit+'，不会自然下降'),
+          note('生育条件：已打成年疫苗、健康 >'+CFG.breeding.minHealth+'、心情 >'+CFG.breeding.minMood+'、好感 >'+CFG.breeding.minFavor)
+        ])
+      + sec('😾 敌意（只有耄耋猫）',[
+          up('撸猫被挠 +'+p.scratchHostilityGain+' · 被呲 +'+p.hissHostilityGain+' · 玩玩具被呲 +'+p.hissHostilityGain),
+          down('喂猫条 −'+p.treatHostilityDown),
+          note('敌意越高越容易呲人 / 挠人；被挠伤要在 '+s.nearDeathDays+' 游戏天内打人疫苗（'+H.humanVaccine+' 猫币）')
+        ])
+      + sec('🪮 护理与其他',[
+          note('指甲超过 '+care.nailDays+' 天：猫会磨坏玩具，每次 −'+care.nailToyDamage+' 耐久（房间面板可剪指甲）'),
+          note('驱虫每季度 1 次（'+care.wormDays+' 天），超期生病概率更高'),
+          note('猫草：消消乐 ≥200 分得种子，种下 '+Math.round(CFG.catgrass.growSec/60)+' 分钟后长出，共 '+CFG.catgrass.bites+' 口；猫自己去啃，每口 心情 +'+CFG.catgrass.mood+'、健康 +'+CFG.catgrass.health),
+          note('品牌猫粮：当天第一次吃饭 心情 +5；杂牌猫粮便宜，但 5% 概率拉肚子'),
+          note('年龄：幼猫 <'+CFG.stage.kittenMax+' 天 · 未成年 <'+CFG.stage.teenMax+' 天 · 成年 <'+CFG.stage.adultMax+' 天 · 之后算老年'),
+          note('1 游戏天 = '+CFG.secPerDay+' 秒，每天结算一次上述涨跌')
+        ]);
+  }
+  var helpMask=document.getElementById('md-helpbox');
+  var helpBtn=document.getElementById('md-help');
+  function openHelp(){
+    var body=document.getElementById('md-help-body');
+    if(body&&!body.dataset.built){body.innerHTML=helpHTML();body.dataset.built='1';}
+    helpMask.hidden=false;
+    document.body.classList.add('md-help-open');
+    var cb=document.getElementById('md-help-close');
+    if(cb&&cb.focus)cb.focus();
+  }
+  function closeHelp(){
+    if(!helpMask||helpMask.hidden)return;
+    helpMask.hidden=true;
+    document.body.classList.remove('md-help-open');
+    if(helpBtn&&helpBtn.focus)helpBtn.focus();
+  }
+  if(helpBtn)helpBtn.addEventListener('click',function(e){e.stopPropagation();openHelp();});
+  var helpCloseBtn=document.getElementById('md-help-close');
+  if(helpCloseBtn)helpCloseBtn.addEventListener('click',closeHelp);
+  if(helpMask)helpMask.addEventListener('click',function(e){if(e.target===helpMask)closeHelp();});
+  document.addEventListener('keydown',function(e){if(e.key==='Escape'||e.keyCode===27)closeHelp();});
 
   /* ================= 主循环 ================= */
   S=load()||freshState();
