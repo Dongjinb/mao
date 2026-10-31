@@ -1,13 +1,13 @@
-# 喵屋日记 · 联机存档服务
+# 喵屋日记 · 存档服务
 
-只包含两个文件：
+两个文件：
 
 | 文件 | 作用 |
 |---|---|
 | `index.html` | 整个游戏（单文件，双击也能玩，只是不能云同步） |
-| `server.cjs` | 存档服务（Node 内置模块实现，**零依赖**，Node 18+） |
+| `server.cjs` | 存档服务：账号密码 + 每账号一份存档（Node 内置模块，**零依赖**，Node 18+） |
 
-云同步靠一个 **10 位同步码**：同一串码 + 同一个服务地址 = 同一份存档，换设备/换浏览器都行。
+玩家注册账号，存档跟着账号走：换电脑、换手机，登录同一个账号就能接着玩。账号数据全在你自己的服务器上。
 
 ---
 
@@ -15,23 +15,23 @@
 
 ```bash
 node server.cjs
-# 喵屋日记存档服务已启动
-#   页面：http://127.0.0.1:8787/
-#   接口：http://127.0.0.1:8787/api/health
-#   存档目录：.../data/saves
+# 页面：http://127.0.0.1:8787/
+# 接口：http://127.0.0.1:8787/api/health
 ```
 
-浏览器打开 <http://127.0.0.1:8787/> → 顶栏 **☁ 云存档** → 点「上传存档」。
+打开页面 → 顶栏 **☁ 云存档** → 注册一个账号 → 「上传存档」。
 
-存档就是 `data/saves/<同步码>.json`，直接复制这个文件到新服务器就是迁移。
+重启服务后账号和存档都还在（都写在 `data/` 下）。
 
 可调环境变量：
 
 | 变量 | 默认 | 说明 |
 |---|---|---|
 | `PORT` | `8787` | 监听端口 |
-| `HOST` | `0.0.0.0` | 监听地址（只想本机用就设 `127.0.0.1`） |
-| `SAVE_DIR` | `./data/saves` | 存档目录，建议指向独立磁盘/备份目录 |
+| `HOST` | `0.0.0.0` | 监听地址（只给本机用就设 `127.0.0.1`） |
+| `SAVE_DIR` | `./data/saves` | 存档目录，建议指向独立磁盘 |
+| `USERS_DIR` | `./data/users` | 账号目录 |
+| `SAVE_SECRET` | 自动生成 | 签发登录 token 的密钥；不填会生成 `data/secret.key` |
 | `PUBLIC_DIR` | 有 `public/` 用它，否则用脚本同目录 | 静态页面目录 |
 
 ---
@@ -63,6 +63,7 @@ ExecStart=/usr/bin/node /opt/meow/server.cjs
 Environment=PORT=8787
 Environment=HOST=127.0.0.1
 Environment=SAVE_DIR=/opt/meow/data/saves
+Environment=USERS_DIR=/opt/meow/data/users
 Restart=always
 RestartSec=3
 
@@ -73,7 +74,7 @@ WantedBy=multi-user.target
 ```bash
 sudo systemctl daemon-reload
 sudo systemctl enable --now meow-save
-curl http://127.0.0.1:8787/api/health   # {"ok":true,"saves":0}
+curl http://127.0.0.1:8787/api/health   # {"ok":true,"saves":0,"users":0}
 ```
 
 > `HOST=127.0.0.1` 表示只让 nginx 访问，不直接暴露 Node。
@@ -103,19 +104,19 @@ sudo nginx -t && sudo systemctl reload nginx
 sudo certbot --nginx -d meow.example.com
 ```
 
-打开 `https://meow.example.com/` 就是完整游戏（页面和接口同源，什么都不用配）。
+打开 `https://meow.example.com/` 就是完整游戏，页面和接口同源，什么都不用配。
+
+**必须用 HTTPS**：密码和 token 都是明文头部，走 HTTP 会被中间人看到。
 
 ---
 
 ## 三、页面放别处（GitHub Pages / 对象存储）也能同步
 
-接口带 `Access-Control-Allow-Origin: *`，所以游戏不必和存档服务同域：
+接口带 `Access-Control-Allow-Origin: *`，所以游戏页面不必和存档服务同域：
 
-1. 游戏页面照旧放 Pages；
+1. 游戏照旧放 Pages；
 2. 打开 **☁ 云存档** → 「服务地址」填 `https://meow.example.com`；
-3. 填/生成同步码 → 上传。
-
-> 明文 HTTP 会泄露同步码，请务必用 HTTPS。
+3. 注册/登录 → 上传。
 
 ---
 
@@ -123,44 +124,63 @@ sudo certbot --nginx -d meow.example.com
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| `GET` | `/api/health` | `{"ok":true,"saves":3}` |
-| `GET` | `/api/save/<CODE>` | 200 `{code,updatedAt,data}`；没有则 404 |
-| `PUT` | `/api/save/<CODE>` | body `{"data":{...存档对象...},"updatedAt":毫秒}` → 200 |
+| `POST` | `/api/register` | `{name,pass}` → `{token,name,uid}`；重名 409 |
+| `POST` | `/api/login` | `{name,pass}` → `{token,name,uid}`；错误 401 |
+| `GET` | `/api/me` | 需 `Authorization: Bearer <token>` → `{name,uid,updatedAt}` |
+| `GET` | `/api/me/save` | 需 token → `{name,updatedAt,data}`；没有 404 |
+| `PUT` | `/api/me/save` | 需 token，`{data:{...},updatedAt}` → 200；每次覆盖前留一份 `.bak` |
+| `GET` | `/api/health` | `{"ok":true,"saves":2,"users":1}` |
+| `GET/PUT` | `/api/save/<同步码>` | **旧版**无账号同步，仍可用，便于老存档迁移 |
 
-限制与校验：
+规则：
 
-- 同步码 `^[A-Z0-9]{6,16}$`（页面生成的是 10 位，字母表去掉 `0O1I`）；
-- body 上限 2 MB；`data.cats` 必须是数组，否则 400；
-- 每 IP 每 10 秒最多 60 次请求，超出 429；
-- 写入用「临时文件 + rename」，断电不会写出半个文件。
+- 用户名 2-20 位（中文/字母/数字/下划线/点/横线），大小写不敏感（`Ali` 和 `ali` 是同一个账号，登录返回注册时的大小写）；
+- 密码 6-64 位，存的是 **scrypt(salt)** 哈希，不存明文；
+- 登录 token 是 HMAC-SHA256 签名，有效期 30 天，服务端无状态；
+- 同 IP 每 10 秒最多 60 次请求（429）；同一账号 10 分钟内错 10 次密码会被锁到下一窗口；
+- 请求体上限 2 MB，`data.cats` 必须是数组；
+- 写盘用「临时文件 + rename」，断电不会留半个文件。
 
 ---
 
-## 五、备份与迁移
+## 五、数据长什么样
 
-```bash
-# 备份（建议放 cron，每天一次）
-tar czf /backup/meow-saves-$(date +%F).tar.gz -C /opt/meow data/saves
-
-# 迁移到新机器：把 data/saves 整个拷过去即可，同步码不变就能继续用
+```
+data/
+├── secret.key                 # token 签名密钥（自动生成，别泄露、别丢）
+├── users/
+│   └── c6b438b0c071b087.json  # {uid,name,salt,hash,createdAt}，文件名 = sha256(小写用户名) 前 16 位
+└── saves/
+    ├── user-c6b438b0c071b087.json      # 该账号的存档
+    ├── user-c6b438b0c071b087.bak.json  # 上一版（每次上传覆盖前留存）
+    └── ABC123XYZ9.json                 # 旧版同步码存档（如果还在用）
 ```
 
+备份整个 `data/` 就是全量备份：
+
+```bash
+tar czf /backup/meow-$(date +%F).tar.gz -C /opt/meow data
+```
+
+迁移到新机器：把 `data/` 整个拷过去，账号密码、存档、已登录 token 全都继续有效（`secret.key` 一起搬，否则所有人要重新登录）。
+
 ---
 
-## 六、安全提醒
+## 六、安全与运维提醒
 
-- **同步码就是密码**：谁拿到码谁就能读写这份存档，别发到群里；
-- 服务端没有用户体系，也不做内容审核，属于「自己的小服务器」用法；
-- 想更稳可以加一层：nginx 里对 `/api/` 加 `limit_req`，或把 `SAVE_DIR` 放到有快照的磁盘上。
+- **没做邮箱验证、找回密码、注销**：忘了密码只能由服主删账号；
+- 删账号但保留存档：删掉 `data/users/<uid>.json`，玩家用**同一用户名**重新注册即可——uid 由用户名哈希得出，存档文件还是那一个；
+- 建议 nginx 再叠一层 `limit_req`，并把 `data/` 放在有快照的磁盘上；
+- 没有内容审核：存档是玩家自己上传的 JSON，服务端只校验结构。
 
 ---
 
 ## 七、常见问题
 
-**手机上玩？** 服务和页面在同一台机器上时，手机用 `http://<电脑局域网IP>:8787/`（此时 `HOST` 要是 `0.0.0.0`）。
+**手机玩？** 服务和页面同机时，手机用 `http://<电脑局域网IP>:8787/`（`HOST` 要是 `0.0.0.0`）。
 
 **换端口？** `PORT=9000 node server.cjs`。
 
-**同步码丢了？** 服务端只有 `data/saves/<码>.json`；知道码就能找回，不知道就只能翻文件名的码。
+**页面从别处打开后提示「不是从服务器打开的」？** 那是 `file://` 直开的情况，浏览器禁止联网；用服务器地址打开，或在「服务地址」里填服务器域名。
 
-**之前用的是云开发版本？** 那个版本已废弃，存档在云开发 PG 里，`public.cat_saves` 表还在的话可以 `select * from cat_saves` 导出 `data` 字段，再调 `PUT /api/save/<码>` 灌回来。
+**之前用云开发的版本？** 已废弃。若 `public.cat_saves` 表还在，可以 `select data from cat_saves` 导出，再 `PUT /api/save/<码>` 灌进新服务，或用账号接口 `PUT /api/me/save`。

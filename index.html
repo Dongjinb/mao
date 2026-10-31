@@ -3976,329 +3976,248 @@ h4{font-size:14px}
   if(helpMask)helpMask.addEventListener('click',function(e){if(e.target===helpMask)closeHelp();});
   document.addEventListener('keydown',function(e){if(e.key==='Escape'||e.keyCode===27)closeHelp();});
 
-  /* ================= 云存档（自建存档服务） ================= */
-  var CLOUD_CFG_KEY='meow-diary-cloud-cfg', CLOUD_CODE_KEY='meow-diary-cloud-code';
-  var CLOUD_ALPHABET='23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
-  var cloud={busy:false,lastAt:0,dirty:false,error:'',ready:false};
+  /* ================= 云存档（自建服务 · 账号密码） ================= */
+  var CLOUD_CFG_KEY='meow-diary-cloud-cfg3';
+  var CLOUD_AUTH_KEY='meow-diary-auth';
+  var cloud={cfg:{base:'',auto:true},auth:null,busy:false,dirty:false,lastSync:0,info:null,msg:''};
 
-  function cloudEsc(s){
-    return String(s==null?'':s).replace(/[&<>"']/g,function(c){
-      return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
-    });
-  }
-  function cloudCfg(){
-    var cfg={base:'',auto:true};
-    try{
-      var o=JSON.parse(localStorage.getItem(CLOUD_CFG_KEY)||'null');
-      if(o&&typeof o==='object'){
-        if(o.base)cfg.base=String(o.base).trim();
-        cfg.auto=o.auto!==false;
-      }
-    }catch(e){}
-    return cfg;
-  }
-  function cloudCfgSave(cfg){try{localStorage.setItem(CLOUD_CFG_KEY,JSON.stringify(cfg));}catch(e){}}
-  function cloudCodeGet(){try{return localStorage.getItem(CLOUD_CODE_KEY)||'';}catch(e){return '';}}
-  function cloudCodeSet(c){try{if(c)localStorage.setItem(CLOUD_CODE_KEY,c);else localStorage.removeItem(CLOUD_CODE_KEY);}catch(e){}}
-  function cloudGenCode(){
-    var s='';
-    for(var i=0;i<10;i++)s+=CLOUD_ALPHABET.charAt(Math.floor(Math.random()*CLOUD_ALPHABET.length));
-    return s;
-  }
-  function cloudCodeEnsure(){
-    var c=cloudCodeGet();
-    if(!c){c=cloudGenCode();cloudCodeSet(c);}
-    return c;
-  }
-
-  // 服务地址：留空就用当前页面的域名（页面和存档服务部署在一起时最省事）
+  function cloudCfgLoad(){ try{ var o=JSON.parse(localStorage.getItem(CLOUD_CFG_KEY)||'null'); if(o&&typeof o==='object') return {base:typeof o.base==='string'?o.base:'',auto:o.auto!==false}; }catch(e){} return {base:'',auto:true}; }
+  function cloudCfgSave(){ try{ localStorage.setItem(CLOUD_CFG_KEY,JSON.stringify(cloud.cfg)); }catch(e){} }
+  function cloudAuthLoad(){ try{ var o=JSON.parse(localStorage.getItem(CLOUD_AUTH_KEY)||'null'); if(o&&o.token&&o.name) return {token:String(o.token),name:String(o.name)}; }catch(e){} return null; }
+  function cloudAuthSet(a){ cloud.auth=a||null; try{ if(a)localStorage.setItem(CLOUD_AUTH_KEY,JSON.stringify({token:a.token,name:a.name})); else localStorage.removeItem(CLOUD_AUTH_KEY); }catch(e){} }
   function cloudBase(){
-    var b=cloudCfg().base.replace(/\/+$/,'');
-    if(b)return b;
-    if(location.protocol==='http:'||location.protocol==='https:')return location.origin;
+    var b=String((cloud.cfg&&cloud.cfg.base)||'').trim().replace(/\/+$/,'');
+    if(b) return /^https?:\/\//i.test(b)?b:'https://'+b;
+    if(location.protocol==='http:'||location.protocol==='https:') return location.protocol+'//'+location.host;
     return '';
   }
-  function cloudUrl(code){
-    var b=cloudBase();
-    return b?b+'/api/save/'+encodeURIComponent(code):'';
-  }
+  function cloudEsc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
+  function cloudTime(ts){ if(!ts)return '—'; var d=new Date(Number(ts)); if(isNaN(d.getTime()))return '—'; return (d.getMonth()+1)+'-'+d.getDate()+' '+('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2); }
+
   function cloudErrText(e){
-    if(!e)return '未知错误';
-    var raw=(typeof e==='string')?e:(e.message||e.errMsg||JSON.stringify(e));
-    raw=String(raw);
-    var short=raw.length>160?raw.slice(0,160)+'…':raw;
-    if(/Failed to fetch|NetworkError|Load failed|blocked by|CORS/i.test(raw))
-      return '连不上存档服务：检查「服务地址」是否填对、服务是否在跑、有没有开 HTTPS（原始：'+short+'）';
-    if(/没有可用的存档服务地址/.test(raw))return raw;
-    return short;
+    var code=String((e&&e.message)||e||''), msg=String((e&&e.msg)||'');
+    if(code==='not-served') return '页面是从本机文件打开的，浏览器不让它联网。请用服务器地址打开（如 http://127.0.0.1:8787/），或在「服务地址」里填你服务器的 https 地址再试。';
+    if(code==='network') return '连不上 '+cloudBase()+' —— 检查服务是否在跑、地址和端口对不对、https 证书是否有效。';
+    if(code==='unauthorized') return '登录已过期，请重新登录。';
+    if(code==='bad-credentials') return '用户名或密码不对。';
+    if(code==='name-taken') return '这个用户名已经有人用了，换一个。';
+    if(code==='bad-name') return '用户名要 2-20 位：中文、字母、数字、下划线。';
+    if(code==='bad-pass') return '密码至少 6 位。';
+    if(code==='too-many-tries') return '试错太多次，过 10 分钟再试。';
+    if(code==='rate-limited') return '请求太频繁，歇一会儿再点。';
+    if(code==='not-found') return '云端还没有这份存档。';
+    if(code==='bad-data') return '本机存档格式不对，先玩几秒再上传。';
+    if(code==='too-large') return '存档太大了（上限 2MB）。';
+    if(code==='http-404') return '接口不存在：服务端是不是旧版本？把 server.cjs 也更新一下。';
+    if(code==='http-500'||code==='server-error') return '服务器出错了：'+(msg||'看下服务端日志');
+    return '操作失败：'+(msg||code||'未知错误');
   }
 
-  async function cloudRequest(method,url,body){
-    var opt={method:method,cache:'no-store'};
-    if(body!==undefined){
-      opt.headers={'Content-Type':'application/json'};
-      opt.body=JSON.stringify(body);
-    }
-    var res;
-    try{res=await fetch(url,opt);}
-    catch(e){throw new Error(cloudErrText(e));}
-    if(res.status===404)return {missing:true};
-    if(res.status===413)throw new Error('存档太大（服务端限制 2MB）');
-    if(res.status===429)throw new Error('请求太频繁，等几秒再试');
-    if(!res.ok){
-      var msg='HTTP '+res.status;
-      try{var j=await res.json();if(j&&(j.message||j.error))msg+=' · '+(j.message||j.error);}catch(e){}
-      throw new Error(msg);
-    }
-    try{return {data:await res.json()};}
-    catch(e){throw new Error('服务端返回的不是 JSON，检查反向代理/服务地址是否指错');}
+  function cloudApi(method,path,body){
+    var base=cloudBase();
+    if(!base) return Promise.reject(new Error('not-served'));
+    var h={'Content-Type':'application/json'};
+    if(cloud.auth) h.Authorization='Bearer '+cloud.auth.token;
+    return fetch(base+path,{
+      method:method,headers:h,cache:'no-store',
+      body:body===undefined?undefined:JSON.stringify(body)
+    }).then(function(res){
+      return res.text().then(function(txt){
+        var data=null; try{ data=txt?JSON.parse(txt):null; }catch(e){}
+        if(!res.ok){
+          var err=new Error((data&&data.error)||('http-'+res.status));
+          err.msg=(data&&data.message)||'';
+          err.status=res.status;
+          if(res.status===401){ err.status=401; var isAuthCall=/^\/api\/(login|register)$/.test(path); if(!isAuthCall) cloudAuthSet(null); }
+          throw err;
+        }
+        return data;
+      });
+    },function(){ throw new Error('network'); });
   }
 
-  function cloudLocalState(){
-    var raw='';
-    try{raw=localStorage.getItem(SAVE_KEY)||'';}catch(e){}
-    if(!raw){save();try{raw=localStorage.getItem(SAVE_KEY)||'';}catch(e){}}
-    if(!raw)throw new Error('本机还没有存档');
-    try{return JSON.parse(raw);}catch(e){throw new Error('本机存档损坏，先修好再同步');}
+  function cloudSay(text,cls){
+    cloud.msg='<div class="md-cloud-status '+(cls||'')+'">'+text+'</div>';
+    var box=typeof $==='function'?$('#md-cloud-body'):null;
+    if(box){ var old=box.querySelector('.md-cloud-msg'); if(old){ old.outerHTML=cloud.msg.replace('class="md-cloud-status','class="md-cloud-status md-cloud-msg'); } }
+  }
+  function cloudStatusHTML(){
+    if(cloud.msg) return cloud.msg.replace('class="md-cloud-status','class="md-cloud-status md-cloud-msg');
+    return '';
   }
 
-  async function cloudUpload(){
-    var code=cloudCodeEnsure();
-    var url=cloudUrl(code);
-    if(!url)throw new Error('没有可用的存档服务地址：请用服务器地址（http/https）打开页面，或在上面的「服务地址」里填你的服务器');
-    var state=cloudLocalState();
-    var r=await cloudRequest('PUT',url,{data:state,updatedAt:Date.now()});
-    cloud.lastAt=(r.data&&Number(r.data.updatedAt))||Date.now();
-    cloud.ready=true;
-    return {day:state.day,cats:(state.cats||[]).length};
-  }
-
-  async function cloudFetchRow(){
-    var code=cloudCodeGet();
-    if(!code)throw new Error('还没有同步码');
-    var url=cloudUrl(code);
-    if(!url)throw new Error('没有可用的存档服务地址：请用服务器地址（http/https）打开页面，或在上面的「服务地址」里填你的服务器');
-    var r=await cloudRequest('GET',url);
-    if(r.missing)return null;
-    var row=r.data||{};
-    if(!row.data)return null;
-    cloud.lastAt=Number(row.updatedAt)||cloud.lastAt;
-    cloud.ready=true;
-    return {payload:row.data,updatedAt:row.updatedAt};
-  }
-
-  function cloudApplyRow(row){
-    var payload=row&&row.payload;
-    if(!payload)throw new Error('云端存档内容为空');
-    var parsed=payload;
-    if(typeof payload==='string'){
-      try{parsed=JSON.parse(payload);}catch(e){throw new Error('云端存档损坏');}
-    }
-    if(!parsed||!parsed.cats)throw new Error('云端存档格式不对');
-    try{localStorage.setItem(SAVE_KEY,JSON.stringify(parsed));}catch(e){throw new Error('本机写入失败：'+cloudErrText(e));}
-    if(row.updatedAt)cloud.lastAt=Number(row.updatedAt);
-    return parsed;
-  }
-
-  function cloudStatusLine(){
-    if(cloud.error)return {cls:'err',text:'⚠ '+cloud.error};
-    var url=cloudUrl(cloudCodeGet()||'CODE');
-    if(!url)return {cls:'err',text:'这个页面不是从服务器打开的：把页面放到服务器的 public/ 里，用 http://你的域名/ 打开'};
-    if(cloud.ready)return {cls:'ok',text:'已连上 '+cloudBase()};
-    return {cls:'',text:'存档服务：'+cloudBase()+'（点「上传存档」开始同步）'};
-  }
-  function cloudFmtTime(t){
-    if(!t)return '—';
-    var d=new Date(Number(t));
-    if(isNaN(d.getTime()))return '—';
-    function p(n){return (n<10?'0':'')+n;}
-    return p(d.getMonth()+1)+'-'+p(d.getDate())+' '+p(d.getHours())+':'+p(d.getMinutes());
-  }
-
-  function cloudHTML(){
-    var cfg=cloudCfg(), code=cloudCodeGet(), st=cloudStatusLine();
+  function cloudBodyHTML(){
     var h='';
-    h+='<div class="md-cloud-status '+st.cls+'" id="md-cloud-status">'+cloudEsc(st.text)+'</div>';
-    h+='<div class="md-cloud-grid" style="margin-bottom:8px">';
-    h+='<label for="md-cloud-base">服务地址</label><input class="md-cloud-input" id="md-cloud-base" value="'+cloudEsc(cfg.base)+'" placeholder="留空 = 当前域名；也可填 https://paw.example.com" autocomplete="off" spellcheck="false">';
-    h+='</div>';
-    h+='<div class="md-cloud-row">';
-    h+='<button class="btn btn-sm btn-primary" data-act="upload" type="button">⬆ 上传存档</button>';
-    h+='<button class="btn btn-sm" data-act="fetch" type="button">⬇ 从云端恢复</button>';
-    h+='<label class="md-cloud-wrap"><input type="checkbox" id="md-cloud-auto"'+(cfg.auto?' checked':'')+'> 自动同步</label>';
-    h+='</div>';
+    if(cloud.auth){
+      var up=cloud.info&&cloud.info.updatedAt;
+      h+='<div class="md-cloud-status ok">已登录 <b>'+cloudEsc(cloud.auth.name)+'</b> · '+(up?('云端更新于 '+cloudTime(up)):'云端还没有存档')+'</div>';
+    }else{
+      h+='<div class="md-cloud-status">未登录 · 注册一个账号，存档就跟着账号走：换电脑/手机，输同一个用户名密码就能取回。</div>';
+    }
+    h+=cloudStatusHTML();
+    h+='<div class="md-cloud-grid"><label for="md-cloud-base">服务地址</label><input class="md-cloud-input" id="md-cloud-base" placeholder="留空＝当前域名；页面放别处时填 https://paw.example.com" value="'+cloudEsc(cloud.cfg.base)+'"></div>';
+    if(!cloud.auth){
+      h+='<div class="md-cloud-grid"><label for="md-auth-name">用户名</label><input class="md-cloud-input" id="md-auth-name" maxlength="20" autocomplete="username" placeholder="2-20 位：中文/字母/数字/下划线"></div>';
+      h+='<div class="md-cloud-grid"><label for="md-auth-pass">密码</label><input class="md-cloud-input" id="md-auth-pass" type="password" maxlength="64" autocomplete="current-password" placeholder="至少 6 位"></div>';
+      h+='<div class="md-cloud-row"><button class="btn btn-primary btn-sm" id="md-login" type="button">登录</button><button class="btn btn-sm" id="md-register" type="button">注册新账号</button></div>';
+      h+='<div class="md-cloud-tip">账号密码只存在你自己的服务器上，密码是 scrypt 哈希，不是明文；忘了密码只能让服主删账号重来。</div>';
+    }else{
+      h+='<div class="md-cloud-row">'
+        +'<button class="btn btn-primary btn-sm" id="md-upload" type="button">↑ 上传存档</button>'
+        +'<button class="btn btn-sm" id="md-download" type="button">↓ 从云端恢复</button>'
+        +'<label class="md-cloud-tip" style="display:flex;align-items:center;gap:6px;margin:0"><input type="checkbox" id="md-auto"'+(cloud.cfg.auto!==false?' checked':'')+'> 自动同步</label>'
+        +'<button class="btn btn-xs" id="md-logout" type="button">退出登录</button>'
+        +'</div>';
+      h+='<div class="md-cloud-tip">每个账号一份存档：上传覆盖云端（会留一份上一版 .bak），恢复会覆盖本机。</div>';
+    }
     h+='<div class="md-cloud-hr"></div>';
-    h+='<div class="md-cloud-row"><span class="md-cloud-code" id="md-cloud-code">'+cloudEsc(code||'未生成')+'</span>';
-    h+='<button class="btn btn-xs" data-act="copy" type="button">复制</button>';
-    h+='<button class="btn btn-xs" data-act="newcode" type="button">换一个</button></div>';
-    h+='<div class="md-cloud-row"><input class="md-cloud-input" id="md-cloud-codein" maxlength="16" placeholder="换设备时填同步码后点右边" style="max-width:210px" autocomplete="off" spellcheck="false">';
-    h+='<button class="btn btn-xs" data-act="usecode" type="button">用这个码恢复</button></div>';
-    h+='<div class="md-cloud-tip">同步码就是这份存档的唯一标识：换设备时填同一个码就能取回。<br>⚠ 拿到码的人也能读写这份存档，别公开分享。</div>';
-    h+='<div class="md-cloud-hr"></div>';
-    h+='<details class="md-cloud-adv"><summary>服务端怎么开</summary>';
-    h+='<div class="md-cloud-tip" style="margin-top:6px">服务器上放三个东西：<code>server.js</code>、<code>public/index.html</code>、<code>data/</code>（自动生成），然后 <code>node server.js</code>（默认 8787 端口，可用 <code>PORT=80</code> 覆盖）。<br>存档是 <code>data/saves/同步码.json</code>，直接备份这个目录就行。</div></details>';
-    h+='当前存档：第 '+S.day+' 天 · 💰'+S.coins+' · 🐱'+S.cats.length+' 只 · 上次同步 '+(cloud.lastAt?cloudFmtTime(cloud.lastAt):'—');
+    h+='<details class="md-cloud-adv"><summary>服务端怎么开</summary><div class="md-cloud-tip" style="margin-top:6px">'
+      +'服务器上放 <code>index.html</code> 和 <code>server.cjs</code>，执行 <code>node server.cjs</code>（默认 8787 端口，<code>PORT=80 node server.cjs</code> 可改）。'
+      +'账号和存档都在 <code>data/</code> 下（<code>users/</code> 账号、<code>saves/</code> 存档），备份这个目录就是全量备份。<br>'
+      +'接口：<code>POST /api/register</code>、<code>POST /api/login</code>、<code>GET|PUT /api/me/save</code>（Bearer token）。</div></details>';
     return h;
   }
 
+  function cloudBusy(on){
+    cloud.busy=!!on;
+    ['md-login','md-register','md-upload','md-download','md-logout'].forEach(function(id){
+      var b=document.getElementById(id); if(!b)return;
+      b.disabled=!!on;
+      if(on&&!b.getAttribute('data-label')) b.setAttribute('data-label',b.textContent);
+      if(on) b.textContent='稍等…';
+      else if(b.getAttribute('data-label')){ b.textContent=b.getAttribute('data-label'); b.removeAttribute('data-label'); }
+    });
+  }
+
   function cloudRefresh(){
-    var st=cloudStatusLine();
-    var el=document.getElementById('md-cloud-status');
-    if(el){el.className='md-cloud-status '+st.cls;el.textContent=st.text;}
-    var cd=document.getElementById('md-cloud-code');
-    if(cd)cd.textContent=cloudCodeGet()||'未生成';
+    var box=document.getElementById('md-cloud-body');
+    if(!box) return;
+    box.innerHTML=cloudBodyHTML();
+    var base=document.getElementById('md-cloud-base');
+    if(base) base.addEventListener('change',function(){ cloud.cfg.base=String(base.value||'').trim(); cloudCfgSave(); cloudSay('服务地址已保存','ok'); });
+    var nameEl=document.getElementById('md-auth-name'), passEl=document.getElementById('md-auth-pass');
+    if(nameEl&&cloud.cfg.lastName&&!nameEl.value) nameEl.value=cloud.cfg.lastName;
+    var auto=document.getElementById('md-auto');
+    if(auto) auto.addEventListener('change',function(){ cloud.cfg.auto=!!auto.checked; cloudCfgSave(); });
+    var bind=function(id,fn){ var b=document.getElementById(id); if(b) b.addEventListener('click',fn); };
+    bind('md-login',function(){ cloudAuth('login'); });
+    bind('md-register',function(){ cloudAuth('register'); });
+    bind('md-upload',function(){ cloudUpload(false); });
+    bind('md-download',function(){ cloudDownload(); });
+    bind('md-logout',function(){ cloudAuthSet(null); cloud.info=null; cloudSay('已退出登录，本机存档还在','ok'); cloudRefresh(); });
   }
 
-  function cloudReadForm(){
-    var cfg=cloudCfg();
-    var e=document.getElementById('md-cloud-base');
-    var a=document.getElementById('md-cloud-auto');
-    if(e)cfg.base=e.value.trim();
-    if(a)cfg.auto=!!a.checked;
-    cloudCfgSave(cfg);
-    cloud.ready=false;
-    return cfg;
-  }
-
-  function cloudBusyUI(busy){
-    cloud.busy=!!busy;
-    var btns=document.querySelectorAll('#md-cloud-body [data-act]');
-    for(var i=0;i<btns.length;i++)btns[i].disabled=!!busy;
-  }
-
-  async function cloudRun(act,opts){
-    if(cloud.busy)return;
-    opts=opts||{};
-    var silent=!!opts.silent;
-    function say(msg){if(!silent)toast(msg);}
-    cloudReadForm();
-    try{
-      if(act==='upload'){
-        cloudBusyUI(true);cloud.error='';
-        var d=await cloudUpload();
-        say('☁ 已上传到服务器（第'+d.day+'天）');
-      }else if(act==='fetch'){
-        cloudBusyUI(true);cloud.error='';
-        var row=await cloudFetchRow();
-        if(!row){say('服务器上还没有这个同步码的存档');}
-        else{
-          var when=cloudFmtTime(row.updatedAt);
-          var info='更新于 '+when;
-          if(window.confirm('云端存档：'+info+'\n\n用云端的存档覆盖本机吗？（本机会被替换）')){
-            cloudApplyRow(row);
-            say('☁ 已从服务器恢复，正在重新载入…');
-            setTimeout(function(){location.reload();},700);
-            return;
-          }
-        }
-      }else if(act==='copy'){
-        var code=cloudCodeEnsure();
-        var ok=false;
-        try{if(navigator.clipboard&&navigator.clipboard.writeText){await navigator.clipboard.writeText(code);ok=true;}}catch(e){}
-        if(!ok){
-          var ta=document.createElement('textarea');
-          ta.value=code;ta.style.position='fixed';ta.style.opacity='0';
-          document.body.appendChild(ta);ta.select();
-          try{ok=document.execCommand('copy');}catch(e){}
-          document.body.removeChild(ta);
-        }
-        say(ok?('已复制同步码 '+code):'复制失败，请手动抄下 '+code);
-        cloudRefresh();
-        return;
-      }else if(act==='newcode'){
-        if(!window.confirm('换一个新同步码？\n\n旧码对应的存档不会删除，还能用旧码取回。'))return;
-        cloudCodeSet(cloudGenCode());
-        cloudRefresh();
-        say('已换新同步码，记得在新设备上用它');
-        return;
-      }else if(act==='usecode'){
-        var inp=document.getElementById('md-cloud-codein');
-        var val=inp?String(inp.value||'').toUpperCase().replace(/[^A-Z0-9]/g,''):'';
-        if(val.length<6){say('同步码至少 6 位');return;}
-        cloudCodeSet(val);
-        cloudRefresh();
-        say('已切换到同步码 '+val+'，点「从云端恢复」取档');
-        return;
-      }
-    }catch(e){
-      cloud.error=cloudErrText(e);
-      say('☁ '+cloud.error);
-    }finally{
-      cloudBusyUI(false);
+  function cloudAuth(act){
+    if(cloud.busy) return;
+    var n=document.getElementById('md-auth-name'), p=document.getElementById('md-auth-pass');
+    var name=n?String(n.value||'').trim():'', pass=p?String(p.value||''):'';
+    if(!name){ cloudSay('先填用户名','err'); if(n)n.focus(); return; }
+    if(pass.length<6){ cloudSay('密码至少 6 位','err'); if(p)p.focus(); return; }
+    cloud.cfg.lastName=name; cloudCfgSave();
+    cloudBusy(true); cloud.msg='';
+    cloudApi('POST',act==='register'?'/api/register':'/api/login',{name:name,pass:pass}).then(function(r){
+      cloudAuthSet({token:r.token,name:r.name});
+      cloud.dirty=true; cloud.lastSync=0;
+      return cloudApi('GET','/api/me').catch(function(){ return null; });
+    }).then(function(me){
+      cloud.info=me||{name:cloud.auth&&cloud.auth.name,updatedAt:null};
       cloudRefresh();
-    }
+      cloudSay((act==='register'?'注册成功，已登录 ':'登录成功，')+'<b>'+cloudEsc(cloud.auth.name)+'</b>'+(cloud.info&&cloud.info.updatedAt?('；云端有存档（'+cloudTime(cloud.info.updatedAt)+'），点「从云端恢复」取回'):'；云端还没有存档，点「上传存档」保存'),'ok');
+      cloudMaybeRestore();
+    }).catch(function(e){ cloudSay(cloudEsc(cloudErrText(e)),'err'); cloudRefresh(); })
+      .then(function(){ cloudBusy(false); });
   }
 
-  var cloudMask=document.getElementById('md-cloudbox');
-  var cloudBtn=document.getElementById('md-cloud');
+  function cloudSaveData(){
+    try{ var raw=localStorage.getItem(SAVE_KEY); if(!raw) return null; var o=JSON.parse(raw); return (o&&typeof o==='object')?o:null; }catch(e){ return null; }
+  }
+
+  function cloudUpload(silent){
+    if(!cloud.auth){ cloudSay('先登录','err'); return Promise.resolve(false); }
+    if(cloud.busy&&!silent) return Promise.resolve(false);
+    var data=cloudSaveData();
+    if(!data){ cloudSay('本机还没有存档，先玩一会儿','err'); return Promise.resolve(false); }
+    if(!silent) cloudBusy(true);
+    return cloudApi('PUT','/api/me/save',{data:data,updatedAt:Date.now()}).then(function(r){
+      cloud.dirty=false; cloud.lastSync=Date.now();
+      cloud.info=cloud.info||{}; cloud.info.updatedAt=r.updatedAt;
+      if(!silent) cloudSay('已上传：第 '+(data.day||'?')+' 天 · '+(data.cats?data.cats.length:0)+' 只猫 · '+cloudTime(r.updatedAt),'ok');
+      if(!silent) cloudRefresh();
+      return true;
+    }).catch(function(e){
+      if(!silent) cloudSay(cloudEsc(cloudErrText(e)),'err');
+      if(!silent) cloudRefresh();
+      return false;
+    }).then(function(ok){ if(!silent) cloudBusy(false); return ok; });
+  }
+
+  function cloudDownload(){
+    if(!cloud.auth){ cloudSay('先登录','err'); return; }
+    if(cloud.busy) return;
+    cloudBusy(true); cloud.msg='';
+    cloudApi('GET','/api/me/save').then(function(row){
+      if(!row||!row.data) throw new Error('not-found');
+      var d=row.data;
+      var warn='云端存档：第 '+(d.day||'?')+' 天 · '+(d.cats?d.cats.length:0)+' 只猫 · '+cloudTime(row.updatedAt)+'\n\n这会覆盖本机存档，继续？';
+      if(!window.confirm(warn)){ cloudSay('已取消',''); cloudBusy(false); return; }
+      try{ localStorage.setItem(SAVE_KEY,JSON.stringify(d)); }catch(e){}
+      cloud.dirty=false; cloud.lastSync=Date.now();
+      cloudSay('已取回云端存档，正在重载…','ok');
+      setTimeout(function(){ location.reload(); },500);
+    }).catch(function(e){ cloudSay(cloudEsc(cloudErrText(e)),'err'); cloudBusy(false); cloudRefresh(); });
+  }
+
+  function cloudMaybeRestore(){
+    if(!cloud.auth||cloud.cfg.auto===false) return;
+    if(localStorage.getItem(SAVE_KEY)) return;
+    cloudApi('GET','/api/me/save').then(function(row){
+      if(!row||!row.data) return;
+      try{ localStorage.setItem(SAVE_KEY,JSON.stringify(row.data)); }catch(e){}
+      cloudSay('已自动取回云端存档（第 '+(row.data.day||'?')+' 天），正在重载…','ok');
+      setTimeout(function(){ location.reload(); },600);
+    }).catch(function(){});
+  }
+
+  function cloudMarkDirty(){ cloud.dirty=true; }
+  function cloudTick(){
+    if(!cloud.auth||cloud.cfg.auto===false) return;
+    if(!cloud.dirty) return;
+    if(Date.now()-cloud.lastSync<8000) return;
+    cloudUpload(true);
+  }
+
   function openCloud(){
-    if(!cloudCodeGet())cloudCodeSet(cloudGenCode());
-    var body=document.getElementById('md-cloud-body');
-    if(body)body.innerHTML=cloudHTML();
-    if(cloudMask)cloudMask.hidden=false;
+    var box=document.getElementById('md-cloudbox'); if(!box)return;
+    cloud.cfg=cloud.cfg||cloudCfgLoad();
+    cloud.auth=cloud.auth||cloudAuthLoad();
+    cloud.msg='';
+    cloudRefresh();
+    box.hidden=false;
     document.body.classList.add('md-help-open');
-    var cb=document.getElementById('md-cloud-close');
-    if(cb&&cb.focus)cb.focus();
+    if(cloud.auth) cloudApi('GET','/api/me').then(function(me){ cloud.info=me; cloudRefresh(); }).catch(function(){});
+    var f=document.getElementById('md-cloud-close'); if(f) f.focus();
   }
   function closeCloud(){
-    if(!cloudMask||cloudMask.hidden)return;
-    cloudMask.hidden=true;
-    document.body.classList.remove('md-help-open');
-    if(cloudBtn&&cloudBtn.focus)cloudBtn.focus();
-  }
-  if(cloudBtn)cloudBtn.addEventListener('click',function(e){e.stopPropagation();openCloud();});
-  var cloudCloseBtn=document.getElementById('md-cloud-close');
-  if(cloudCloseBtn)cloudCloseBtn.addEventListener('click',closeCloud);
-  if(cloudMask)cloudMask.addEventListener('click',function(e){if(e.target===cloudMask)closeCloud();});
-  document.addEventListener('keydown',function(e){if(e.key==='Escape'||e.keyCode===27)closeCloud();});
-  var cloudBodyEl=document.getElementById('md-cloud-body');
-  if(cloudBodyEl){
-    cloudBodyEl.addEventListener('click',function(e){
-      var t=e.target&&e.target.closest?e.target.closest('[data-act]'):null;
-      if(!t||t.disabled)return;
-      e.preventDefault();
-      cloudRun(t.getAttribute('data-act'));
-    });
-    cloudBodyEl.addEventListener('change',function(e){
-      var id=e.target&&e.target.id;
-      if(id==='md-cloud-auto')cloudReadForm();
-      if(id==='md-cloud-base')cloudReadForm();
-    });
+    var box=document.getElementById('md-cloudbox'); if(!box)return;
+    box.hidden=true; document.body.classList.remove('md-help-open');
+    var b=document.getElementById('md-cloud'); if(b) b.focus();
   }
 
-  // 自动同步：save() 打脏标记，每 12 秒最多推一次
-  function cloudMarkDirty(){
-    if(!cloudCfg().auto)return;
-    cloud.dirty=true;
-  }
-  function cloudAutoTick(){
-    if(!cloud.dirty||cloud.busy)return;
-    var cfg=cloudCfg();
-    if(!cfg.auto||!cloudUrl(cloudCodeGet()||'x'))return;
-    cloud.dirty=false;
-    cloudRun('upload',{silent:true});
-  }
-  setInterval(cloudAutoTick,12000);
-
-  // 新设备首次打开（本机无存档）：自动拉一次云端的
-  (function cloudFirstRun(){
-    var cfg=cloudCfg();
-    if(!cfg.auto)return;
-    var code=cloudCodeGet();
-    if(!code)return;
-    var local=null;
-    try{local=localStorage.getItem(SAVE_KEY);}catch(e){}
-    if(local)return;
-    setTimeout(function(){
-      cloudFetchRow().then(function(row){
-        if(!row)return;
-        var p=cloudApplyRow(row);
-        toast('☁ 已自动取回服务器存档（第'+(p.day||'?')+'天）');
-        setTimeout(function(){location.reload();},900);
-      }).catch(function(){});
-    },1500);
+  cloud.cfg=cloudCfgLoad();
+  cloud.auth=cloudAuthLoad();
+  (function(){
+    var btn=document.getElementById('md-cloud');
+    if(btn) btn.addEventListener('click',openCloud);
+    var cl=document.getElementById('md-cloud-close');
+    if(cl) cl.addEventListener('click',closeCloud);
+    var box=document.getElementById('md-cloudbox');
+    if(box) box.addEventListener('click',function(e){ if(e.target===box) closeCloud(); });
+    document.addEventListener('keydown',function(e){
+      if(e.key==='Escape'&&box&&!box.hidden){ closeCloud(); }
+    });
+    setInterval(cloudTick,15000);
+    setTimeout(function(){ if(cloud.auth) cloudApi('GET','/api/me').then(function(me){ cloud.info=me; }).catch(function(){}); },1500);
   })();
-
 
   /* ================= 主循环 ================= */
   S=load()||freshState();
